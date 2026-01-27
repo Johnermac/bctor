@@ -26,8 +26,6 @@ func main() {
 		unix.Exit(1)
 	}
 
-	
-
 	if pid == 0 {
 		// ----------------
 		// Child path
@@ -49,7 +47,7 @@ func main() {
 		unix.Close(fd[1])
 		pidStr := strconv.Itoa(int(pid))
 		readNamespaces(pidStr)
-		
+
 		selfExe, _ := os.Readlink("/proc/self/exe")
 
 		for range 50 {
@@ -57,7 +55,9 @@ func main() {
 			childExe, err := os.Readlink("/proc/" + pidStr + "/exe")
 			//readExe(childExe)
 			if err == nil && childExe != selfExe {
-				readStatus("/proc/" + pidStr + "/status")
+				readIdentity("/proc/" + pidStr + "/status")
+				readCapabilities("/proc/" + pidStr + "/status")
+				readCgroups("/proc/" + pidStr + "/cgroup")
 				break
 			}
 		}
@@ -86,8 +86,7 @@ func readExe(exePath string) {
 
 }
 
-func readStatus(statusPath string) {
-
+func readIdentity(statusPath string) {
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		unix.Exit(1)
@@ -96,9 +95,7 @@ func readStatus(statusPath string) {
 	lines := strings.Split(string(data), "\n")
 
 	for _, line := range lines {
-		//os.Stdout.WriteString(line + "\n")
 		fields := strings.Fields(line)
-
 		if len(fields) == 0 {
 			continue
 		}
@@ -113,7 +110,6 @@ func readStatus(statusPath string) {
 				os.Stdout.WriteString("PPID=" + fields[1] + "\n")
 			}
 		case "Uid:":
-			// fields[1] is Real UID, fields[2] is Effective UID
 			if len(fields) >= 3 {
 				os.Stdout.WriteString("UID=" + fields[1] + " EUID=" + fields[2] + "\n")
 			}
@@ -121,6 +117,75 @@ func readStatus(statusPath string) {
 			if len(fields) >= 3 {
 				os.Stdout.WriteString("GID=" + fields[1] + " EGID=" + fields[2] + "\n")
 			}
+		}
+	}
+}
+
+func readCapabilities(statusPath string) {
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		unix.Exit(1)
+	}
+
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+
+		switch fields[0] {
+		case "CapInh:": // Inheritable
+			if len(fields) >= 2 {
+				os.Stdout.WriteString("CapInh=" + fields[1] + "\n")
+			}
+		case "CapPrm:": // Permitted
+			if len(fields) >= 2 {
+				os.Stdout.WriteString("CapPrm=" + fields[1] + "\n")
+			}
+		case "CapEff:": //Effective
+			if len(fields) >= 2 {
+				os.Stdout.WriteString("CapEff=" + fields[1] + "\n")
+			}
+		case "CapBnd:": //Bounding
+			if len(fields) >= 2 {
+				os.Stdout.WriteString("CapBnd=" + fields[1] + "\n")
+			}
+		case "CapAmb:": //Ambient
+			if len(fields) >= 2 {
+				os.Stdout.WriteString("CapAmb=" + fields[1] + "\n")
+			}
+		}
+	}
+}
+
+func readCgroups(cgroupPath string) {
+	data, err := os.ReadFile(cgroupPath)
+	if err != nil {
+		unix.Exit(1)
+	}
+
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		// log verbatim
+		os.Stdout.WriteString(line + "\n")
+
+		// split into hierarchy ID, controllers, cgroup path
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) == 3 {
+			hierarchyID := parts[0]
+			controllers := parts[1]
+			cgroupPath := parts[2]
+
+			os.Stdout.WriteString("HierarchyID=" + hierarchyID + "\n")
+			os.Stdout.WriteString("Controllers=" + controllers + "\n")
+			os.Stdout.WriteString("CgroupPath=" + cgroupPath + "\n")
 		}
 	}
 }
