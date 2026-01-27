@@ -45,41 +45,80 @@ func main() {
 
 		_ = pid // child PID
 
-		pidStr := strconv.Itoa(int(pid))
-		statusPath := "/proc/" + pidStr + "/status"
-
-		data, err := os.ReadFile(statusPath)
-		if err != nil {			
-			unix.Exit(1)
-		}
-
-		lines := strings.Split(string(data), "\n")		
-
-		for _, line := range lines {
-			fields := strings.Fields(line)    
-			
-			if len(fields) < 2 {
-					continue
-			}
-
-			switch fields[0] {
-				case "Pid:":
-						os.Stdout.WriteString("PID=" + fields[1] + "\n")
-				case "PPid:":
-						os.Stdout.WriteString("PPID=" + fields[1] + "\n")	
-				case "Uid:":
-						// fields[1] is Real UID, fields[2] is Effective UID
-						os.Stdout.WriteString("UID=" + fields[1] + " EUID="+fields[2]+"\n")
-				case "Gid:":
-						os.Stdout.WriteString("GID=" + fields[1] + " EGID="+fields[2]+"\n")	
-				}				
-		}
-
 		
-			
+		pidStr := strconv.Itoa(int(pid))
+		selfExe, _ := os.Readlink("/proc/self/exe")
+
+		exePathStr := "/proc/" + pidStr + "/exe"
+		childExe, _ := os.Readlink(exePathStr)
+		EXEC_CONFIRMED := false
+
+
+		for range 50 {
+			//readExe(childExe)			
+			if childExe != selfExe {
+				EXEC_CONFIRMED = true
+					statusPath := "/proc/" + pidStr + "/status"
+					readStatus(statusPath)					
+					break
+			}
+		}		
+		if EXEC_CONFIRMED {
+			os.Stdout.WriteString("EXEC_CONFIRMED=true\n")
+		} else {
+			os.Stdout.WriteString("EXEC_CONFIRMED=false\n")
+		}
+		
+
 
 		// For now, just wait to avoid zombie
 		var status unix.WaitStatus
 		_, _ = unix.Wait4(int(pid), &status, 0, nil)
+	}
+}
+
+func readExe(exePath string) {
+	// Print exec path		
+		os.Stdout.WriteString("EXE=" + exePath + "\n")
+		//return "EXE=" + exePath + "\n"
+
+}
+
+func readStatus(statusPath string) {	
+
+	data, err := os.ReadFile(statusPath)
+	if err != nil {			
+		unix.Exit(1)
+	}
+
+	lines := strings.Split(string(data), "\n")	
+
+	for _, line := range lines {
+		//os.Stdout.WriteString(line + "\n")
+		fields := strings.Fields(line)  
+
+		if len(fields) == 0 {
+			continue
+		} 			
+
+		switch fields[0] {
+			case "Pid:":
+				if len(fields) >= 2 {
+					os.Stdout.WriteString("PID=" + fields[1] + "\n")
+				}					
+			case "PPid:":
+				if len(fields) >= 2 {
+					os.Stdout.WriteString("PPID=" + fields[1] + "\n")	
+				}					
+			case "Uid:":
+					// fields[1] is Real UID, fields[2] is Effective UID
+					if len(fields) >= 3 {
+						os.Stdout.WriteString("UID=" + fields[1] + " EUID="+fields[2]+"\n")
+					}						
+			case "Gid:":
+				if len(fields) >= 3 {
+					os.Stdout.WriteString("GID=" + fields[1] + " EGID="+fields[2]+"\n")	
+				}					
+			}							
 	}
 }
