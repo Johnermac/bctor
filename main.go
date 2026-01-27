@@ -55,9 +55,10 @@ func main() {
 			childExe, err := os.Readlink("/proc/" + pidStr + "/exe")
 			//readExe(childExe)
 			if err == nil && childExe != selfExe {
-				readIdentity("/proc/" + pidStr + "/status")
-				readCapabilities("/proc/" + pidStr + "/status")
-				readCgroups("/proc/" + pidStr + "/cgroup")
+				readIdentity(pidStr)
+				readCapabilities(pidStr)
+				readCgroups(pidStr)
+				readSyscalls(pidStr)
 				break
 			}
 		}
@@ -86,7 +87,8 @@ func readExe(exePath string) {
 
 }
 
-func readIdentity(statusPath string) {
+func readIdentity(pidStr string) {
+	statusPath := ("/proc/" + pidStr + "/status")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		unix.Exit(1)
@@ -121,7 +123,8 @@ func readIdentity(statusPath string) {
 	}
 }
 
-func readCapabilities(statusPath string) {
+func readCapabilities(pidStr string) {
+	statusPath := ("/proc/" + pidStr + "/status")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		unix.Exit(1)
@@ -160,7 +163,8 @@ func readCapabilities(statusPath string) {
 	}
 }
 
-func readCgroups(cgroupPath string) {
+func readCgroups(pidStr string) {
+	cgroupPath := ("/proc/" + pidStr + "/cgroup")
 	data, err := os.ReadFile(cgroupPath)
 	if err != nil {
 		unix.Exit(1)
@@ -189,6 +193,19 @@ func readCgroups(cgroupPath string) {
 		}
 	}
 }
+
+func readSyscalls(pidStr string) {
+  syscallPath := ("/proc/" + pidStr + "/syscall") 
+	data, err := os.ReadFile(syscallPath)
+		if err != nil {
+			// process may have exited or exec'd between checks
+			return
+		}
+
+		// raw snapshot, do not parse
+		os.Stdout.WriteString("SYSCALL=" + strings.TrimSpace(string(data)) + "\n")
+}
+
 
 func readNamespaces(pidStr string) {
 	nsPaths := []string{"mnt", "pid", "net", "uts", "ipc", "user"}
