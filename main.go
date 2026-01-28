@@ -20,6 +20,11 @@ func main() {
 		panic(err)
 	}
 
+	// -------------------------------- PRINT PARENT 
+
+	os.Stdout.WriteString("=== PARENT (Host) ===\n")
+  lib.StatusCalls("self")
+
 	pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
 	if errno != 0 {
 		// unrecoverable
@@ -30,71 +35,71 @@ func main() {
 		// ----------------
 		// Child path
 		// ----------------
-		//os.Stdout.WriteString("CHILD PATH  ---------------\n")
-		// Close read end, then exec
-		unix.Close(fd[0])
+		
+		unix.Close(fd[0])		
 
-		cfg := lib.NamespaceConfig{ 
-			UTS: true,
+		cfg := lib.NamespaceConfig{ 			
 			USER: true,
-			MOUNT: true,
+			//MOUNT: true,
+			PID: true,			
 		}
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
-			os.Stdout.WriteString("Erro while applying NS: " + err.Error() + "\n")
+			os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
 			unix.Exit(1)
-		}
+		}	
 
-		
-		os.Stdout.WriteString("--\n")
+		// -------------------------------- PRINT CHILD
+		os.Stdout.WriteString("\n=== CHILD (Container) ===\n")
+    lib.StatusCalls("self") 
 
-		path := "/bin/true"
-		err = unix.Exec(path, []string{path}, []string{})
-		if err != nil {
-			unix.Exit(127)
-		}
+		role, err := lib.ResolvePIDNamespace(cfg.PID, fd[1])
+    if err != nil {
+				os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
+        unix.Exit(1)
+    }
 
+		switch role {
+		case lib.PIDRoleExit:
+				// O filho intermediário morre aqui.
+				unix.Exit(0)
+
+		case lib.PIDRoleInit:
+				// -------------------------------- PRINT GRAND-CHILD				
+						
+				os.Stdout.WriteString("\n=== GRAND-CHILD (NS-PID APPLIED) => PID=" + strconv.Itoa(os.Getpid()) +"\n")				
+				lib.StatusCalls("self")
+							
+				
+				path := "/bin/true" 
+				err = unix.Exec(path, []string{path}, os.Environ())
+				if err != nil {
+						os.Stdout.WriteString("Error in unix.Exec PIDRoleInit: " + err.Error() + "\n")						
+				}				
+
+		case lib.PIDRoleContinue:
+				// Caso o PID NS esteja desativado no cfg
+				os.Stdout.WriteString("Executando sem isolamento de PID --\n")
+				path := "/bin/true"
+				err = unix.Exec(path, []string{path}, os.Environ())
+				if err != nil {
+						os.Stdout.WriteString("Error in unix.Exec PIDRoleContinue: " + err.Error() + "\n")						
+				}				
+		}		
 	} else {
-		// ----------------
-		// Parent path
-		// ----------------
-		// Close write end immediately
-		//os.Stdout.WriteString("PARENT PATH ---------------\n")
+			// ----------------
+			// Parent path
+			// ----------------
+			unix.Close(fd[1]) // close write end
+			//pidStr := strconv.Itoa(int(pid)) child pid			
 
-		unix.Close(fd[1])
-		pidStr := strconv.Itoa(int(pid))
-		selfExe, _ := os.Readlink("/proc/self/exe")
+			// wait for EOF on pipe
+			buf := make([]byte, 1)
+			_, _ = unix.Read(fd[0], buf)
+			unix.Close(fd[0])
 
-			
-
-		
-
-		for range 50 {
-			childExe, err := os.Readlink("/proc/" + pidStr + "/exe")
-			//readExe(childExe)
-			if err == nil && childExe != selfExe {
-				lib.StatusCalls(pidStr) //child
-				os.Stdout.WriteString("\n\n")
-				lib.StatusCalls("self") //parent
-				break
-			}
-		}
-		
-		
-
-		// Wait for EOF on the pipe (signifies Exec happened)
-		buf := make([]byte, 1)
-		n, _ := unix.Read(fd[0], buf)
-		unix.Close(fd[0])
-
-		if n == 0 {
-			os.Stdout.WriteString("EXEC_CONFIRMED=true\n")
-		} else {
-			os.Stdout.WriteString("EXEC_CONFIRMED=false\n")
-		}
-
-		// For now, just wait to avoid zombie
-		var status unix.WaitStatus
-		_, _ = unix.Wait4(int(pid), &status, 0, nil)
+			// reap child
+			var status unix.WaitStatus
+			_, _ = unix.Wait4(int(pid), &status, 0, nil)
 	}
 }
