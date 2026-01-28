@@ -4,6 +4,7 @@ visual map
 
 --- Namespaces ---
 
+```
 UTS 
   └─  set: CLONE_NEWUTS
 
@@ -18,11 +19,10 @@ PID
   |   set: CLONE_NEWPID
   └─  it only apply to new processes, so we have to fork again to create the granchild
 
-```
-parent
- 	└─ child (unshare NEWPID)
-     		└─ grandchild (PID 1, exec here)
-```
+    parent
+      └─ child (unshare NEWPID)
+            └─ grandchild (PID 1, exec here)
+
 
 IPC
   └─  set: CLONE_NEWIPC
@@ -30,7 +30,7 @@ IPC
 NET
   |   set: CLONE_NEWNET
   └─  Bring up loopback for poc
-
+```
 
 
 ---
