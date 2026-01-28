@@ -35,9 +35,9 @@ func main() {
 		unix.Close(fd[0])
 
 		cfg := lib.NamespaceConfig{ 
-			UTS: true, 
-			User: true, 
-			//PID: true, 
+			UTS: true,
+			USER: true,
+			MOUNT: true,
 		}
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
@@ -45,6 +45,7 @@ func main() {
 			unix.Exit(1)
 		}
 
+		
 		os.Stdout.WriteString("--\n")
 
 		path := "/bin/true"
@@ -64,25 +65,22 @@ func main() {
 		pidStr := strconv.Itoa(int(pid))
 		selfExe, _ := os.Readlink("/proc/self/exe")
 
-		// 1. Check Namespace Inodes immediately
-		parentNS, _ := os.Readlink("/proc/self/ns/uts")
-		childNS, _ := os.Readlink("/proc/" + pidStr + "/ns/uts")
+			
 
-		os.Stdout.WriteString("PARENT UTS: " + parentNS + "\n")
-		os.Stdout.WriteString("CHILD  UTS: " + childNS + "\n")
-
-		if parentNS != childNS {
-			os.Stdout.WriteString("NS_ISOLATION_CONFIRMED=true\n")
-		}
+		
 
 		for range 50 {
 			childExe, err := os.Readlink("/proc/" + pidStr + "/exe")
 			//readExe(childExe)
 			if err == nil && childExe != selfExe {
-				lib.StatusCalls(pidStr)
+				lib.StatusCalls(pidStr) //child
+				os.Stdout.WriteString("\n\n")
+				lib.StatusCalls("self") //parent
 				break
 			}
 		}
+		
+		
 
 		// Wait for EOF on the pipe (signifies Exec happened)
 		buf := make([]byte, 1)

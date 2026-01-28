@@ -6,10 +6,10 @@ import (
 
 type NamespaceConfig struct {
 	UTS   bool
-	Mount bool
+	MOUNT bool
 	PID   bool
-	Net   bool
-	User  bool
+	NET   bool
+	USER  bool
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
@@ -18,16 +18,16 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	if cfg.UTS {
 		flags |= unix.CLONE_NEWUTS
 	}
-	if cfg.Mount {
-		flags |= unix.CLONE_NEWNS
+	if cfg.MOUNT {
+		flags |= unix.CLONE_NEWNS		
 	}
 	if cfg.PID {
 		flags |= unix.CLONE_NEWPID
 	}
-	if cfg.Net {
+	if cfg.NET {
 		flags |= unix.CLONE_NEWNET
 	}
-	if cfg.User {
+	if cfg.USER {
 		flags |= unix.CLONE_NEWUSER
 	}
 
@@ -35,5 +35,27 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 		return nil
 	}
 
-	return unix.Unshare(flags)
+	err := unix.Unshare(flags)
+	if err != nil {
+		return err
+	}
+
+	err = flagsChecks(cfg)
+	if err != nil {
+		return err
+	}	
+
+	return nil
+}
+
+func flagsChecks(cfg NamespaceConfig) error {
+	if cfg.MOUNT {
+		// This is equivalent to 'mount --make-rprivate /'
+		// It ensures child mounts don't leak to the parent system
+		err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, "")
+		if err != nil {
+			return err
+		}		
+	}
+	return nil
 }
