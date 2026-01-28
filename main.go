@@ -20,10 +20,14 @@ func main() {
 		panic(err)
 	}
 
-	// -------------------------------- PRINT PARENT 
+	// -------------------------------- PRINT PARENT
 
 	os.Stdout.WriteString("=== PARENT (Host) ===\n")
-  lib.StatusCalls("self")
+	parentNS := lib.StatusCalls("self")
+
+	for ns, id := range parentNS {
+		os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+	}
 
 	pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
 	if errno != 0 {
@@ -35,74 +39,80 @@ func main() {
 		// ----------------
 		// Child path
 		// ----------------
-		
-		unix.Close(fd[0])		
 
-		cfg := lib.NamespaceConfig{ 			
+		unix.Close(fd[0])
+
+		cfg := lib.NamespaceConfig{
 			USER: true,
 			//MOUNT: true,
-			//PID: true,		
+			//PID: true,
 			//UTS: true,
-			//NET: true,	
+			//NET: true,
 			IPC: true,
 		}
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
 			os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
 			unix.Exit(1)
-		}	
+		}
 
 		// -------------------------------- PRINT CHILD
 		os.Stdout.WriteString("\n=== CHILD (Container) ===\n")
-    lib.StatusCalls("self") 
+		childNS := lib.StatusCalls("self")
+		for ns, id := range childNS {
+			os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+		}
 
 		role, err := lib.ResolvePIDNamespace(cfg.PID, fd[1])
-    if err != nil {
-				os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
-        unix.Exit(1)
-    }
+		if err != nil {
+			os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
+			unix.Exit(1)
+		}
 
 		switch role {
 		case lib.PIDRoleExit:
-				// O filho intermediário morre aqui.
-				unix.Exit(0)
+			// O filho intermediário morre aqui.
+			unix.Exit(0)
 
 		case lib.PIDRoleInit:
-				// -------------------------------- PRINT GRAND-CHILD				
-						
-				os.Stdout.WriteString("\n=== GRAND-CHILD (NS-PID APPLIED) => PID=" + strconv.Itoa(os.Getpid()) +"\n")				
-				lib.StatusCalls("self")
-							
-				
-				path := "/bin/true" 
-				err = unix.Exec(path, []string{path}, os.Environ())
-				if err != nil {
-						os.Stdout.WriteString("Error in unix.Exec PIDRoleInit: " + err.Error() + "\n")						
-				}				
+			// -------------------------------- PRINT GRAND-CHILD
+
+			os.Stdout.WriteString("\n=== GRAND-CHILD (NS-PID APPLIED) => PID=" + strconv.Itoa(os.Getpid()) + "\n")
+			grandChildNS := lib.StatusCalls("self")
+
+			for ns, id := range grandChildNS {
+				os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+			}
+
+			path := "/bin/true"
+			err = unix.Exec(path, []string{path}, os.Environ())
+			if err != nil {
+				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit: " + err.Error() + "\n")
+			}
 
 		case lib.PIDRoleContinue:
-				// Caso o PID NS esteja desativado no cfg
-				//os.Stdout.WriteString("Executando sem isolamento de PID --\n")
-				path := "/bin/true"
-				err = unix.Exec(path, []string{path}, os.Environ())
-				if err != nil {
-						os.Stdout.WriteString("Error in unix.Exec PIDRoleContinue: " + err.Error() + "\n")						
-				}				
-		}		
+			// Caso o PID NS esteja desativado no cfg
+			//os.Stdout.WriteString("Executando sem isolamento de PID --\n")
+			path := "/bin/true"
+			err = unix.Exec(path, []string{path}, os.Environ())
+			if err != nil {
+				os.Stdout.WriteString("Error in unix.Exec PIDRoleContinue: " + err.Error() + "\n")
+			}
+		}
 	} else {
-			// ----------------
-			// Parent path
-			// ----------------
-			unix.Close(fd[1]) // close write end
-			//pidStr := strconv.Itoa(int(pid)) child pid			
+		// ----------------
+		// Parent path
+		// ----------------
+		unix.Close(fd[1]) // close write end
+		//pidStr := strconv.Itoa(int(pid)) child pid
 
-			// wait for EOF on pipe
-			buf := make([]byte, 1)
-			_, _ = unix.Read(fd[0], buf)
-			unix.Close(fd[0])
+		// wait for EOF on pipe
+		buf := make([]byte, 1)
+		_, _ = unix.Read(fd[0], buf)
+		unix.Close(fd[0])
 
-			// reap child
-			var status unix.WaitStatus
-			_, _ = unix.Wait4(int(pid), &status, 0, nil)
+		// reap child
+		var status unix.WaitStatus
+		_, _ = unix.Wait4(int(pid), &status, 0, nil)
 	}
 }

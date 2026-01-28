@@ -7,8 +7,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func StatusCalls(pidStr string) {
-	readNamespaces(pidStr)
+func StatusCalls(pidStr string) map[string]string {
+	return readNamespaces(pidStr)
 	//readIdentity(pidStr)
 	//readCapabilities(pidStr)
 	//readCgroups(pidStr)
@@ -141,20 +141,24 @@ func readSyscalls(pidStr string) {
 	os.Stdout.WriteString("SYSCALL=" + strings.TrimSpace(string(data)) + "\n")
 }
 
-func readNamespaces(pidStr string) {
+func readNamespaces(pidStr string) map[string]string {
 	nsPaths := []string{"mnt", "pid", "net", "uts", "ipc", "user"}
+	results := make(map[string]string)
 
 	for _, ns := range nsPaths {
 		target, err := os.Readlink("/proc/" + pidStr + "/ns/" + ns)
 		if err != nil {
-			os.Stdout.WriteString("NS_" + ns + "=error\n")
+			results[ns] = "error"
 			continue
 		}
 		// target looks like "mnt:[4026531840]"
 		parts := strings.Split(target, ":")
 		if len(parts) == 2 {
 			id := strings.Trim(parts[1], "[]")
-			os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+			results[ns] = id
+		} else {
+			results[ns] = target
 		}
 	}
+	return results
 }

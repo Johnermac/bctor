@@ -23,7 +23,7 @@ type NamespaceConfig struct {
 	PID   bool
 	NET   bool
 	USER  bool
-	IPC 	bool
+	IPC   bool
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
@@ -33,7 +33,7 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 		flags |= unix.CLONE_NEWUTS
 	}
 	if cfg.MOUNT {
-		flags |= unix.CLONE_NEWNS		
+		flags |= unix.CLONE_NEWNS
 	}
 	if cfg.PID {
 		flags |= unix.CLONE_NEWPID
@@ -60,7 +60,7 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	err = flagsChecks(cfg)
 	if err != nil {
 		return fmt.Errorf("flag check falhou: %v", err)
-	}	
+	}
 
 	return nil
 }
@@ -72,25 +72,25 @@ func flagsChecks(cfg NamespaceConfig) error {
 		err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, "")
 		if err != nil {
 			return err
-		}		
-	}	
+		}
+	}
 
-	if cfg.NET {       
+	if cfg.NET {
 
-    // Bring up loopback using netlink
-    lo, err := netlink.LinkByName("lo")
-    if err != nil {
-        return fmt.Errorf("cannot find lo: %w", err)
-    }
-    if err := netlink.LinkSetUp(lo); err != nil {
-        return fmt.Errorf("cannot bring up lo: %w", err)
-    }
+		// Bring up loopback using netlink
+		lo, err := netlink.LinkByName("lo")
+		if err != nil {
+			return fmt.Errorf("cannot find lo: %w", err)
+		}
+		if err := netlink.LinkSetUp(lo); err != nil {
+			return fmt.Errorf("cannot bring up lo: %w", err)
+		}
 
-    // interfaces
-    links, _ := netlink.LinkList()
-    for _, l := range links {
-        fmt.Printf("%v: %v\n", l.Attrs().Name, l.Attrs().Flags)
-    }
+		// interfaces
+		links, _ := netlink.LinkList()
+		for _, l := range links {
+			fmt.Printf("%v: %v\n", l.Attrs().Name, l.Attrs().Flags)
+		}
 	}
 
 	if cfg.IPC {
@@ -98,7 +98,6 @@ func flagsChecks(cfg NamespaceConfig) error {
 		// for now the ns-ipc works for poc
 
 	}
-
 
 	return nil
 }
@@ -125,11 +124,10 @@ func ResolvePIDNamespace(enabled bool, writeFD int) (PIDRole, error) {
 	return PIDRoleExit, nil
 
 	/*
-	*** mental map for PID namespace implmentation ***
+			*** mental map for PID namespace implmentation ***
 
-	parent
- 	└─ child (unshare NEWPID)
-     		└─ grandchild (PID 1, exec here)
+			parent
+		 	└─ child (unshare NEWPID)
+		     		└─ grandchild (PID 1, exec here)
 	*/
 }
-
