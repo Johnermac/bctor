@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +23,7 @@ type NamespaceConfig struct {
 	PID   bool
 	NET   bool
 	USER  bool
+	IPC 	bool
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
@@ -41,6 +43,9 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	}
 	if cfg.USER {
 		flags |= unix.CLONE_NEWUSER
+	}
+	if cfg.IPC {
+		flags |= unix.CLONE_NEWIPC
 	}
 
 	if flags == 0 {
@@ -69,6 +74,32 @@ func flagsChecks(cfg NamespaceConfig) error {
 			return err
 		}		
 	}	
+
+	if cfg.NET {       
+
+    // Bring up loopback using netlink
+    lo, err := netlink.LinkByName("lo")
+    if err != nil {
+        return fmt.Errorf("cannot find lo: %w", err)
+    }
+    if err := netlink.LinkSetUp(lo); err != nil {
+        return fmt.Errorf("cannot bring up lo: %w", err)
+    }
+
+    // interfaces
+    links, _ := netlink.LinkList()
+    for _, l := range links {
+        fmt.Printf("%v: %v\n", l.Attrs().Name, l.Attrs().Flags)
+    }
+	}
+
+	if cfg.IPC {
+		// todo later some implmentation
+		// for now the ns-ipc works for poc
+
+	}
+
+
 	return nil
 }
 

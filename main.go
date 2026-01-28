@@ -41,7 +41,10 @@ func main() {
 		cfg := lib.NamespaceConfig{ 			
 			USER: true,
 			//MOUNT: true,
-			PID: true,			
+			//PID: true,		
+			//UTS: true,
+			//NET: true,	
+			IPC: true,
 		}
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
@@ -79,7 +82,7 @@ func main() {
 
 		case lib.PIDRoleContinue:
 				// Caso o PID NS esteja desativado no cfg
-				os.Stdout.WriteString("Executando sem isolamento de PID --\n")
+				//os.Stdout.WriteString("Executando sem isolamento de PID --\n")
 				path := "/bin/true"
 				err = unix.Exec(path, []string{path}, os.Environ())
 				if err != nil {
