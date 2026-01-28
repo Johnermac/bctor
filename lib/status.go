@@ -7,6 +7,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func StatusCalls(pidStr string) {
+	readNamespaces(pidStr)
+	//readIdentity(pidStr)
+	//readCapabilities(pidStr)
+	//readCgroups(pidStr)
+	//readSyscalls(pidStr)
+}
+
 func ReadExe(exePath string) {
 	// Print exec path
 	os.Stdout.WriteString("EXE=" + exePath + "\n")
@@ -14,7 +22,7 @@ func ReadExe(exePath string) {
 
 }
 
-func ReadIdentity(pidStr string) {
+func readIdentity(pidStr string) {
 	statusPath := ("/proc/" + pidStr + "/status")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
@@ -50,7 +58,7 @@ func ReadIdentity(pidStr string) {
 	}
 }
 
-func ReadCapabilities(pidStr string) {
+func readCapabilities(pidStr string) {
 	statusPath := ("/proc/" + pidStr + "/status")
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
@@ -90,7 +98,7 @@ func ReadCapabilities(pidStr string) {
 	}
 }
 
-func ReadCgroups(pidStr string) {
+func readCgroups(pidStr string) {
 	cgroupPath := ("/proc/" + pidStr + "/cgroup")
 	data, err := os.ReadFile(cgroupPath)
 	if err != nil {
@@ -121,19 +129,19 @@ func ReadCgroups(pidStr string) {
 	}
 }
 
-func ReadSyscalls(pidStr string) {
-  syscallPath := ("/proc/" + pidStr + "/syscall") 
+func readSyscalls(pidStr string) {
+	syscallPath := ("/proc/" + pidStr + "/syscall")
 	data, err := os.ReadFile(syscallPath)
-		if err != nil {
-			// process may have exited or exec'd between checks
-			return
-		}
+	if err != nil {
+		// process may have exited or exec'd between checks
+		return
+	}
 
-		// raw snapshot, do not parse
-		os.Stdout.WriteString("SYSCALL=" + strings.TrimSpace(string(data)) + "\n")
+	// raw snapshot, do not parse
+	os.Stdout.WriteString("SYSCALL=" + strings.TrimSpace(string(data)) + "\n")
 }
 
-func ReadNamespaces(pidStr string) {
+func readNamespaces(pidStr string) {
 	nsPaths := []string{"mnt", "pid", "net", "uts", "ipc", "user"}
 
 	for _, ns := range nsPaths {

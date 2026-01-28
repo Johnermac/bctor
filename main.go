@@ -30,11 +30,25 @@ func main() {
 		// ----------------
 		// Child path
 		// ----------------
-
+		//os.Stdout.WriteString("CHILD PATH  ---------------\n")
 		// Close read end, then exec
 		unix.Close(fd[0])
+
+		cfg := lib.NamespaceConfig{ 
+			UTS: true, 
+			User: true, 
+			//PID: true, 
+		}
+		err := lib.ApplyNamespaces(cfg)
+		if err != nil {
+			os.Stdout.WriteString("Erro while applying NS: " + err.Error() + "\n")
+			unix.Exit(1)
+		}
+
+		os.Stdout.WriteString("--\n")
+
 		path := "/bin/true"
-		err := unix.Exec(path, []string{path}, []string{})
+		err = unix.Exec(path, []string{path}, []string{})
 		if err != nil {
 			unix.Exit(127)
 		}
@@ -44,21 +58,28 @@ func main() {
 		// Parent path
 		// ----------------
 		// Close write end immediately
+		//os.Stdout.WriteString("PARENT PATH ---------------\n")
+
 		unix.Close(fd[1])
 		pidStr := strconv.Itoa(int(pid))
-		lib.ReadNamespaces(pidStr)
-
 		selfExe, _ := os.Readlink("/proc/self/exe")
 
-		for range 50 {
+		// 1. Check Namespace Inodes immediately
+		parentNS, _ := os.Readlink("/proc/self/ns/uts")
+		childNS, _ := os.Readlink("/proc/" + pidStr + "/ns/uts")
 
+		os.Stdout.WriteString("PARENT UTS: " + parentNS + "\n")
+		os.Stdout.WriteString("CHILD  UTS: " + childNS + "\n")
+
+		if parentNS != childNS {
+			os.Stdout.WriteString("NS_ISOLATION_CONFIRMED=true\n")
+		}
+
+		for range 50 {
 			childExe, err := os.Readlink("/proc/" + pidStr + "/exe")
 			//readExe(childExe)
 			if err == nil && childExe != selfExe {
-				lib.ReadIdentity(pidStr)
-				lib.ReadCapabilities(pidStr)
-				lib.ReadCgroups(pidStr)
-				lib.ReadSyscalls(pidStr)
+				lib.StatusCalls(pidStr)
 				break
 			}
 		}
@@ -79,5 +100,3 @@ func main() {
 		_, _ = unix.Wait4(int(pid), &status, 0, nil)
 	}
 }
-
-
