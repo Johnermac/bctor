@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"runtime"
-	"strconv"
 
 	"github.com/Johnermac/bctor/lib"
 	"golang.org/x/sys/unix"
@@ -22,12 +21,17 @@ func main() {
 
 	// -------------------------------- PRINT PARENT
 
-	os.Stdout.WriteString("=== PARENT (Host) ===\n")
-	parentNS := lib.StatusCalls("self")
+	//os.Stdout.WriteString("=== NAMESPACES PARENT (Host) ===\n")
+	parentNS, _ := lib.ReadNamespaces(os.Getpid())
+	// optional debug
+	// lib.LogNamespacePosture("parent", parentNS)
 
-	for ns, id := range parentNS {
-		os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+	capStateBefore, err := lib.ReadCaps(os.Getpid())
+	if err != nil {
+		os.Stdout.WriteString("Error in ReadCaps for PARENT: " + err.Error() + "\n")
 	}
+	//lib.LogCaps("PARENT", capStateBefore)
+	//lib.LogCapPosture("parent (initial)", capStateBefore)
 
 	pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
 	if errno != 0 {
@@ -44,12 +48,15 @@ func main() {
 
 		cfg := lib.NamespaceConfig{
 			USER: true,
+
 			//MOUNT: true,
-			//PID: true,
+			PID: true,
 			//UTS: true,
 			//NET: true,
-			IPC: true,
+			//IPC: true,
 		}
+		
+
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
 			os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
@@ -57,11 +64,29 @@ func main() {
 		}
 
 		// -------------------------------- PRINT CHILD
-		os.Stdout.WriteString("\n=== CHILD (Container) ===\n")
-		childNS := lib.StatusCalls("self")
-		for ns, id := range childNS {
-			os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
+		//os.Stdout.WriteString("\n=== NAMESPACES CHILD (Container) ===\n")
+		childNS, _ := lib.ReadNamespaces(os.Getpid())
+
+		nsdiff := lib.DiffNamespaces(parentNS, childNS)
+		lib.LogNamespaceDelta(nsdiff)
+
+		//optional debug
+		//lib.LogNamespacePosture("child", childNS)
+
+		
+
+		capStateAfter, err := lib.ReadCaps(os.Getpid())
+		if err != nil {
+			os.Stdout.WriteString("Error in ReadCaps for CHILD: " + err.Error() + "\n")
 		}
+
+		diff := lib.DiffCaps(capStateBefore, capStateAfter)
+		if len(diff) > 0 {
+			lib.LogCapDelta(diff)
+		}
+		// optional for debug
+		//lib.LogCaps("CHILD", capStateAfter)	
+		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)		
 
 		role, err := lib.ResolvePIDNamespace(cfg.PID, fd[1])
 		if err != nil {
@@ -76,13 +101,13 @@ func main() {
 
 		case lib.PIDRoleInit:
 			// -------------------------------- PRINT GRAND-CHILD
+			
+			grandchildNS, _ := lib.ReadNamespaces(os.Getpid())
+			nsdiff := lib.DiffNamespaces(childNS, grandchildNS)
+			lib.LogNamespaceDelta(nsdiff)
 
-			os.Stdout.WriteString("\n=== GRAND-CHILD (NS-PID APPLIED) => PID=" + strconv.Itoa(os.Getpid()) + "\n")
-			grandChildNS := lib.StatusCalls("self")
-
-			for ns, id := range grandChildNS {
-				os.Stdout.WriteString("NS_" + ns + "=" + id + "\n")
-			}
+			// optional
+			// lib.LogNamespacePosture("grand-child", grandchildNS)			
 
 			path := "/bin/true"
 			err = unix.Exec(path, []string{path}, os.Environ())
@@ -104,8 +129,8 @@ func main() {
 		// Parent path
 		// ----------------
 		unix.Close(fd[1]) // close write end
-		//pidStr := strconv.Itoa(int(pid)) child pid
-
+		//pidStr := strconv.Itoa(int(pid)) child pid		
+		
 		// wait for EOF on pipe
 		buf := make([]byte, 1)
 		_, _ = unix.Read(fd[0], buf)

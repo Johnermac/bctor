@@ -17,7 +17,7 @@ MOUNT
 
 PID
   |   set: CLONE_NEWPID
-  └─  it only apply to new processes, so we have to fork again to create the granchild
+  └─  it only apply to new processes, so we have to fork again (or use clone()) to create the granchild
 
     parent
       └─ child (unshare NEWPID)

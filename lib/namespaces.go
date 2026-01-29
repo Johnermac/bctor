@@ -121,13 +121,5 @@ func ResolvePIDNamespace(enabled bool, writeFD int) (PIDRole, error) {
 	}
 
 	// INTERMEDIÁRIO: Sai imediatamente
-	return PIDRoleExit, nil
-
-	/*
-			*** mental map for PID namespace implmentation ***
-
-			parent
-		 	└─ child (unshare NEWPID)
-		     		└─ grandchild (PID 1, exec here)
-	*/
+	return PIDRoleExit, nil	
 }

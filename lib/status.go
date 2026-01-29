@@ -1,25 +1,41 @@
 package lib
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-func StatusCalls(pidStr string) map[string]string {
-	return readNamespaces(pidStr)
+type Namespace string
+
+const (
+	NS_MNT  Namespace = "mnt"
+	NS_PID  Namespace = "pid"
+	NS_NET  Namespace = "net"
+	NS_UTS  Namespace = "uts"
+	NS_IPC  Namespace = "ipc"
+	NS_USER Namespace = "user"
+)
+
+type NamespaceState struct {
+	PID int
+	IDs map[Namespace]string
+}
+
+type NamespaceDiff struct {
+	Namespace Namespace
+	Before    string
+	After     string
+}
+
+func StatusCalls(pid int) (*NamespaceState, error) {	
+	return ReadNamespaces(pid)
 	//readIdentity(pidStr)
 	//readCapabilities(pidStr)
 	//readCgroups(pidStr)
 	//readSyscalls(pidStr)
-}
-
-func ReadExe(exePath string) {
-	// Print exec path
-	os.Stdout.WriteString("EXE=" + exePath + "\n")
-	//return "EXE=" + exePath + "\n"
-
 }
 
 func readIdentity(pidStr string) {
@@ -141,24 +157,71 @@ func readSyscalls(pidStr string) {
 	os.Stdout.WriteString("SYSCALL=" + strings.TrimSpace(string(data)) + "\n")
 }
 
-func readNamespaces(pidStr string) map[string]string {
-	nsPaths := []string{"mnt", "pid", "net", "uts", "ipc", "user"}
-	results := make(map[string]string)
+func ReadNamespaces(pid int) (*NamespaceState, error) {
+	nsList := []Namespace{NS_MNT, NS_PID, NS_NET, NS_UTS, NS_IPC, NS_USER}
 
-	for _, ns := range nsPaths {
-		target, err := os.Readlink("/proc/" + pidStr + "/ns/" + ns)
+	state := &NamespaceState{
+		PID: pid,
+		IDs: make(map[Namespace]string),
+	}
+
+	for _, ns := range nsList {
+		link := fmt.Sprintf("/proc/%d/ns/%s", pid, ns)
+		target, err := os.Readlink(link)
 		if err != nil {
-			results[ns] = "error"
+			state.IDs[ns] = "error"
 			continue
 		}
-		// target looks like "mnt:[4026531840]"
-		parts := strings.Split(target, ":")
-		if len(parts) == 2 {
-			id := strings.Trim(parts[1], "[]")
-			results[ns] = id
+
+		// Example: "mnt:[4026531840]"
+		if i := strings.Index(target, "["); i != -1 {
+			state.IDs[ns] = strings.TrimSuffix(target[i+1:], "]")
 		} else {
-			results[ns] = target
+			state.IDs[ns] = target
 		}
 	}
-	return results
+
+	return state, nil
 }
+
+func DiffNamespaces(before, after *NamespaceState) []NamespaceDiff {
+	var diffs []NamespaceDiff
+
+	for ns, beforeID := range before.IDs {
+		afterID := after.IDs[ns]
+		if beforeID != afterID {
+			diffs = append(diffs, NamespaceDiff{
+				Namespace: ns,
+				Before:    beforeID,
+				After:     afterID,
+			})
+		}
+	}
+
+	return diffs
+}
+
+func LogNamespacePosture(label string, ns *NamespaceState) {
+	fmt.Printf("\n[NS] %s (pid=%d)\n", label, ns.PID)
+
+	order := []Namespace{NS_USER, NS_MNT, NS_PID, NS_NET, NS_IPC, NS_UTS}
+	for _, n := range order {
+		fmt.Printf("  %-4s → %s\n", n, ns.IDs[n])
+	}
+}
+
+func LogNamespaceDelta(diffs []NamespaceDiff) {
+	if len(diffs) == 0 {
+		fmt.Println("\n[NS] no namespace transitions detected")
+		return
+	}
+
+	fmt.Println("\n[NS] namespace transitions:")
+	for _, d := range diffs {
+		fmt.Printf("  %-4s: %s → %s\n", d.Namespace, d.Before, d.After)
+	}
+}
+
+
+
+
