@@ -22,9 +22,10 @@ func main() {
 	// -------------------------------- PRINT PARENT
 
 	//os.Stdout.WriteString("=== NAMESPACES PARENT (Host) ===\n")
+	//pp := strconv.Itoa(os.Getpid())
 	parentNS, _ := lib.ReadNamespaces(os.Getpid())
 	// optional debug
-	// lib.LogNamespacePosture("parent", parentNS)
+	//lib.LogNamespacePosture("parent", parentNS)
 
 	capStateBefore, err := lib.ReadCaps(os.Getpid())
 	if err != nil {
@@ -48,9 +49,8 @@ func main() {
 
 		cfg := lib.NamespaceConfig{
 			USER: true,
-
 			//MOUNT: true,
-			PID: true,
+			//PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
@@ -65,15 +65,14 @@ func main() {
 
 		// -------------------------------- PRINT CHILD
 		//os.Stdout.WriteString("\n=== NAMESPACES CHILD (Container) ===\n")
+		//gp := strconv.Itoa(os.Getpid())
 		childNS, _ := lib.ReadNamespaces(os.Getpid())
 
 		nsdiff := lib.DiffNamespaces(parentNS, childNS)
 		lib.LogNamespaceDelta(nsdiff)
 
 		//optional debug
-		//lib.LogNamespacePosture("child", childNS)
-
-		
+		//lib.LogNamespacePosture("child", childNS)		
 
 		capStateAfter, err := lib.ReadCaps(os.Getpid())
 		if err != nil {
@@ -88,7 +87,7 @@ func main() {
 		//lib.LogCaps("CHILD", capStateAfter)	
 		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)		
 
-		role, err := lib.ResolvePIDNamespace(cfg.PID, fd[1])
+		role, grandchildHostPid, err := lib.ResolvePIDNamespace(cfg.PID)
 		if err != nil {
 			os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
 			unix.Exit(1)
@@ -96,28 +95,14 @@ func main() {
 
 		switch role {
 		case lib.PIDRoleExit:
-			// O filho intermediário morre aqui.
-			unix.Exit(0)
-
-		case lib.PIDRoleInit:
-			// -------------------------------- PRINT GRAND-CHILD
-			
-			grandchildNS, _ := lib.ReadNamespaces(os.Getpid())
-			nsdiff := lib.DiffNamespaces(childNS, grandchildNS)
+			// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
+			grandchildNS, _ := lib.ReadNamespaces(grandchildHostPid)
+			nsdiff := lib.DiffNamespaces(parentNS, grandchildNS)
 			lib.LogNamespaceDelta(nsdiff)
-
 			// optional
-			// lib.LogNamespacePosture("grand-child", grandchildNS)			
-
-			path := "/bin/true"
-			err = unix.Exec(path, []string{path}, os.Environ())
-			if err != nil {
-				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit: " + err.Error() + "\n")
-			}
-
-		case lib.PIDRoleContinue:
-			// Caso o PID NS esteja desativado no cfg
-			//os.Stdout.WriteString("Executando sem isolamento de PID --\n")
+			// lib.LogNamespacePosture("grand-child", grandchildNS)	
+			unix.Exit(0)
+		case lib.PIDRoleInit, lib.PIDRoleContinue:						
 			path := "/bin/true"
 			err = unix.Exec(path, []string{path}, os.Environ())
 			if err != nil {

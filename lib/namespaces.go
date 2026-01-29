@@ -2,8 +2,6 @@ package lib
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -11,10 +9,11 @@ import (
 
 type PIDRole int
 
+
 const (
 	PIDRoleContinue PIDRole = iota // normal path
 	PIDRoleInit                    // PID 1 in new namespace
-	PIDRoleExit                    // intermediate child
+	PIDRoleExit										// child
 )
 
 type NamespaceConfig struct {
@@ -102,24 +101,22 @@ func flagsChecks(cfg NamespaceConfig) error {
 	return nil
 }
 
-func ResolvePIDNamespace(enabled bool, writeFD int) (PIDRole, error) {
-	if !enabled {
-		return PIDRoleContinue, nil
-	}
+func ResolvePIDNamespace(enabled bool) (PIDRole, int, error) {
+    if !enabled {
+        return PIDRoleContinue, 0, nil
+    }
 
-	pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
-	if errno != 0 {
-		return PIDRoleContinue, errno
-	}
+    pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
+    if errno != 0 {
+        return PIDRoleContinue, 0, errno
+    }
 
-	if pid == 0 {
-		// NETO: Envia o PID real para o Pai e retorna para fazer o Exec
-		myHostPID := strconv.Itoa(os.Getpid())
-		unix.Write(writeFD, []byte(myHostPID+"\n"))
-		unix.Close(writeFD)
-		return PIDRoleInit, nil
-	}
+    if pid == 0 {
+        // granchild
+        return PIDRoleInit, 0, nil 
+    }
 
-	// INTERMEDIÁRIO: Sai imediatamente
-	return PIDRoleExit, nil	
+    // child  
+    return PIDRoleExit, int(pid), nil
 }
+

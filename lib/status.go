@@ -159,7 +159,7 @@ func readSyscalls(pidStr string) {
 
 func ReadNamespaces(pid int) (*NamespaceState, error) {
 	nsList := []Namespace{NS_MNT, NS_PID, NS_NET, NS_UTS, NS_IPC, NS_USER}
-
+	
 	state := &NamespaceState{
 		PID: pid,
 		IDs: make(map[Namespace]string),
