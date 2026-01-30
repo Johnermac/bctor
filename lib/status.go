@@ -30,7 +30,7 @@ type NamespaceDiff struct {
 	After     string
 }
 
-func StatusCalls(pid int) (*NamespaceState, error) {	
+func StatusCalls(pid int) (*NamespaceState, error) {
 	return ReadNamespaces(pid)
 	//readIdentity(pidStr)
 	//readCapabilities(pidStr)
@@ -159,7 +159,7 @@ func readSyscalls(pidStr string) {
 
 func ReadNamespaces(pid int) (*NamespaceState, error) {
 	nsList := []Namespace{NS_MNT, NS_PID, NS_NET, NS_UTS, NS_IPC, NS_USER}
-	
+
 	state := &NamespaceState{
 		PID: pid,
 		IDs: make(map[Namespace]string),
@@ -221,7 +221,3 @@ func LogNamespaceDelta(diffs []NamespaceDiff) {
 		fmt.Printf("  %-4s: %s → %s\n", d.Namespace, d.Before, d.After)
 	}
 }
-
-
-
-

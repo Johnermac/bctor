@@ -9,11 +9,10 @@ import (
 
 type PIDRole int
 
-
 const (
 	PIDRoleContinue PIDRole = iota // normal path
 	PIDRoleInit                    // PID 1 in new namespace
-	PIDRoleExit										// child
+	PIDRoleExit                    // child
 )
 
 type NamespaceConfig struct {
@@ -102,21 +101,28 @@ func flagsChecks(cfg NamespaceConfig) error {
 }
 
 func ResolvePIDNamespace(enabled bool) (PIDRole, int, error) {
-    if !enabled {
-        return PIDRoleContinue, 0, nil
-    }
+	if !enabled {
+		return PIDRoleContinue, 0, nil
+	}
 
-    pid, _, errno := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
-    if errno != 0 {
-        return PIDRoleContinue, 0, errno
-    }
+	pid, err := NewFork()
+	if err != nil {
+		return PIDRoleContinue, 0, nil
+	}
 
-    if pid == 0 {
-        // granchild
-        return PIDRoleInit, 0, nil 
-    }
+	if pid == 0 {
+		// granchild
+		return PIDRoleInit, 0, nil
+	}
 
-    // child  
-    return PIDRoleExit, int(pid), nil
+	// child
+	return PIDRoleExit, int(pid), nil
 }
 
+func NewFork() (uintptr, error) {
+	pid, _, err := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
+	if err != 0 {
+		return 0, err
+	}
+	return pid, nil
+}

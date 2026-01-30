@@ -83,8 +83,8 @@ type CapView struct {
 }
 
 type CapSpec struct {
-	Set   CapSet
-	Cap   Capability
+	Set    CapSet
+	Cap    Capability
 	Enable bool
 }
 
@@ -93,18 +93,17 @@ type CapPlan struct {
 }
 
 type CapDiff struct {
-	Set      CapSet
-	Cap      Capability
-	Before   bool
-	After    bool
+	Set    CapSet
+	Cap    Capability
+	Before bool
+	After  bool
 }
 
 type CapEffect struct {
-	Cap Capability
-	Enables []string
+	Cap      Capability
+	Enables  []string
 	Disables []string
 }
-
 
 func ReadCaps(pid int) (*CapState, error) {
 	path := "/proc/" + strconv.Itoa(pid) + "/status"
@@ -138,7 +137,6 @@ func ReadCaps(pid int) (*CapState, error) {
 
 	return cs, nil
 }
-
 
 func DiffCaps(before, after *CapState) []CapDiff {
 	var diffs []CapDiff
@@ -215,10 +213,10 @@ func LogCapPosture(label string, caps *CapState) {
 
 	fmt.Printf("  Bounding    : %s\n", formatCaps(capsFromMask(caps.Bounding)))
 	fmt.Printf("  Permitted   : %s\n", formatCaps(capsFromMask(caps.Permitted)))
-	fmt.Printf("  Effective   : %s\n", formatCaps(capsFromMask(caps.Effective)))	
+	fmt.Printf("  Effective   : %s\n", formatCaps(capsFromMask(caps.Effective)))
 	fmt.Printf("  Inheritable : %s\n", formatCaps(capsFromMask(caps.Inheritable)))
 	fmt.Printf("  Ambient     : %s\n", formatCaps(capsFromMask(caps.Ambient)))
-	
+
 }
 
 func LogCapDelta(diffs []CapDiff) {
@@ -276,12 +274,167 @@ func DropCapability(cap Capability) error {
 	return nil
 }
 
+// ambient
+
+func ClearAmbient() error {
+	if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0); err != nil {
+		return fmt.Errorf("prctl(PR_CAP_AMBIENT_CLEAR_ALL): %w", err)
+	}
+	return nil
+}
+
+func DropAllCapabilities() error {
+	// clearn Bounding
+
+	for c := 0; c <= int(unix.CAP_LAST_CAP); c++ {
+		_ = unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0)
+	}
+
+	// clearn (Effective, Permitted, Inheritable)
+	hdr := unix.CapUserHeader{
+		Version: unix.LINUX_CAPABILITY_VERSION_3,
+		Pid:     0,
+	}
+
+	// 64 bits
+	data := [2]unix.CapUserData{
+		{Effective: 0, Permitted: 0, Inheritable: 0},
+		{Effective: 0, Permitted: 0, Inheritable: 0},
+	}
+
+	if err := unix.Capset(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capset falhou ao zerar tudo: %w", err)
+	}
+
+	return nil
+}
+
+func DropAllExcept(keep Capability) {
+	for c := 0; c <= int(unix.CAP_LAST_CAP); c++ {
+		if Capability(c) == keep {
+			continue
+		}
+		_ = unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0)
+	}
+}
+
+func SetCapabilities(caps ...Capability) error {
+	hdr := unix.CapUserHeader{
+		Version: unix.LINUX_CAPABILITY_VERSION_3,
+		Pid:     0,
+	}
+
+	// 1. Primeiro, lemos o estado atual para não sobrescrever outras caps por erro
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capget: %w", err)
+	}
+
+	// 2. Zeramos os conjuntos para garantir que APENAS as que passamos fiquem ativas
+	data[0].Effective = 0
+	data[0].Permitted = 0
+	data[1].Effective = 0
+	data[1].Permitted = 0
+
+	// 3. Ativamos os bits das capacidades desejadas
+	for _, c := range caps {
+		idx := c / 32
+		bit := uint(c % 32)
+
+		data[idx].Effective |= (1 << bit)
+		data[idx].Permitted |= (1 << bit)
+	}
+
+	// 4. Aplicamos ao processo
+	if err := unix.Capset(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capset: %w", err)
+	}
+
+	return nil
+}
+
+func RaiseAmbient(cap Capability) error {
+	if err := unix.Prctl(
+		unix.PR_CAP_AMBIENT,
+		unix.PR_CAP_AMBIENT_RAISE,
+		uintptr(cap),
+		0,
+		0,
+	); err != nil {
+		return fmt.Errorf("prctl(PR_CAP_AMBIENT_RAISE %d): %w", cap, err)
+	}
+	return nil
+}
+
+func PrepareForAmbient(cap Capability) error {
+	if err := AddPermitted(cap); err != nil {
+		return fmt.Errorf("add permitted: %w", err)
+	}
+
+	if err := AddInheritable(cap); err != nil {
+		return fmt.Errorf("add inheritable: %w", err)
+	}
+
+	return nil
+}
+
+func AddPermitted(cap Capability) error {
+	return capSet(func(_ *unix.CapUserHeader, d []unix.CapUserData) {
+		idx := cap / 32
+		shift := cap % 32
+		d[idx].Permitted |= 1 << shift
+	})
+}
+
+func AddInheritable(cap Capability) error {
+	return capSet(func(_ *unix.CapUserHeader, d []unix.CapUserData) {
+		idx := cap / 32
+		shift := cap % 32
+		d[idx].Inheritable |= 1 << shift
+	})
+}
+
+func capSet(mutator func(*unix.CapUserHeader, []unix.CapUserData)) error {
+	hdr := &unix.CapUserHeader{
+		Version: unix.LINUX_CAPABILITY_VERSION_3,
+		Pid:     0, // self
+	}
+
+	data := make([]unix.CapUserData, 2)
+
+	if err := unix.Capget(hdr, &data[0]); err != nil {
+		return err
+	}
+
+	mutator(hdr, data)
+
+	if err := unix.Capset(hdr, &data[0]); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setBit(mask *uint32, cap Capability) {
+	*mask |= 1 << uint(cap)
+}
+
+func EnableAmbient(cap Capability) error {
+	if err := PrepareForAmbient(cap); err != nil {
+		return err
+	}
+	if err := RaiseAmbient(cap); err != nil {
+		return err
+	}
+	return nil
+}
 
 // to do
 
-
 //func ApplyCaps(plan CapPlan) error { return nil }
 //func ExplainCap(cap Capability) CapEffect {}
+
+// log
 
 func LogCapChange(diff CapDiff) {
 	action := "UNCHANGED"
@@ -323,44 +476,44 @@ func capSetName(set CapSet) string {
 func capName(cap Capability) string {
 
 	var capNames = map[Capability]string{
-		CAP_CHOWN:           "CAP_CHOWN",
-		CAP_DAC_OVERRIDE:    "CAP_DAC_OVERRIDE",
-		CAP_DAC_READ_SEARCH: "CAP_DAC_READ_SEARCH",
-		CAP_FOWNER:          "CAP_FOWNER",
-		CAP_FSETID:          "CAP_FSETID",
-		CAP_KILL:            "CAP_KILL",
-		CAP_SETGID:          "CAP_SETGID",
-		CAP_SETUID:          "CAP_SETUID",
-		CAP_SETPCAP:         "CAP_SETPCAP",
-		CAP_LINUX_IMMUTABLE: "CAP_LINUX_IMMUTABLE",
-		CAP_NET_BIND_SERVICE:"CAP_NET_BIND_SERVICE",
-		CAP_NET_BROADCAST:   "CAP_NET_BROADCAST",
-		CAP_NET_ADMIN:       "CAP_NET_ADMIN",
-		CAP_NET_RAW:         "CAP_NET_RAW",
-		CAP_IPC_LOCK:        "CAP_IPC_LOCK",
-		CAP_IPC_OWNER:       "CAP_IPC_OWNER",
-		CAP_SYS_MODULE:      "CAP_SYS_MODULE",
-		CAP_SYS_RAWIO:       "CAP_SYS_RAWIO",
-		CAP_SYS_CHROOT:      "CAP_SYS_CHROOT",
-		CAP_SYS_PTRACE:      "CAP_SYS_PTRACE",
-		CAP_SYS_PACCT:       "CAP_SYS_PACCT",
-		CAP_SYS_ADMIN:       "CAP_SYS_ADMIN",
-		CAP_SYS_BOOT:        "CAP_SYS_BOOT",
-		CAP_SYS_NICE:        "CAP_SYS_NICE",
-		CAP_SYS_RESOURCE:    "CAP_SYS_RESOURCE",
-		CAP_SYS_TIME:        "CAP_SYS_TIME",
-		CAP_SYS_TTY_CONFIG:  "CAP_SYS_TTY_CONFIG",
-		CAP_MKNOD:           "CAP_MKNOD",
-		CAP_LEASE:           "CAP_LEASE",
-		CAP_AUDIT_WRITE:     "CAP_AUDIT_WRITE",
-		CAP_AUDIT_CONTROL:   "CAP_AUDIT_CONTROL",
-		CAP_SETFCAP:         "CAP_SETFCAP",
-		CAP_MAC_OVERRIDE:    "CAP_MAC_OVERRIDE",
-		CAP_MAC_ADMIN:       "CAP_MAC_ADMIN",
-		CAP_SYSLOG:          "CAP_SYSLOG",
-		CAP_WAKE_ALARM:      "CAP_WAKE_ALARM",
-		CAP_BLOCK_SUSPEND:   "CAP_BLOCK_SUSPEND",
-		CAP_AUDIT_READ:      "CAP_AUDIT_READ",
+		CAP_CHOWN:            "CAP_CHOWN",
+		CAP_DAC_OVERRIDE:     "CAP_DAC_OVERRIDE",
+		CAP_DAC_READ_SEARCH:  "CAP_DAC_READ_SEARCH",
+		CAP_FOWNER:           "CAP_FOWNER",
+		CAP_FSETID:           "CAP_FSETID",
+		CAP_KILL:             "CAP_KILL",
+		CAP_SETGID:           "CAP_SETGID",
+		CAP_SETUID:           "CAP_SETUID",
+		CAP_SETPCAP:          "CAP_SETPCAP",
+		CAP_LINUX_IMMUTABLE:  "CAP_LINUX_IMMUTABLE",
+		CAP_NET_BIND_SERVICE: "CAP_NET_BIND_SERVICE",
+		CAP_NET_BROADCAST:    "CAP_NET_BROADCAST",
+		CAP_NET_ADMIN:        "CAP_NET_ADMIN",
+		CAP_NET_RAW:          "CAP_NET_RAW",
+		CAP_IPC_LOCK:         "CAP_IPC_LOCK",
+		CAP_IPC_OWNER:        "CAP_IPC_OWNER",
+		CAP_SYS_MODULE:       "CAP_SYS_MODULE",
+		CAP_SYS_RAWIO:        "CAP_SYS_RAWIO",
+		CAP_SYS_CHROOT:       "CAP_SYS_CHROOT",
+		CAP_SYS_PTRACE:       "CAP_SYS_PTRACE",
+		CAP_SYS_PACCT:        "CAP_SYS_PACCT",
+		CAP_SYS_ADMIN:        "CAP_SYS_ADMIN",
+		CAP_SYS_BOOT:         "CAP_SYS_BOOT",
+		CAP_SYS_NICE:         "CAP_SYS_NICE",
+		CAP_SYS_RESOURCE:     "CAP_SYS_RESOURCE",
+		CAP_SYS_TIME:         "CAP_SYS_TIME",
+		CAP_SYS_TTY_CONFIG:   "CAP_SYS_TTY_CONFIG",
+		CAP_MKNOD:            "CAP_MKNOD",
+		CAP_LEASE:            "CAP_LEASE",
+		CAP_AUDIT_WRITE:      "CAP_AUDIT_WRITE",
+		CAP_AUDIT_CONTROL:    "CAP_AUDIT_CONTROL",
+		CAP_SETFCAP:          "CAP_SETFCAP",
+		CAP_MAC_OVERRIDE:     "CAP_MAC_OVERRIDE",
+		CAP_MAC_ADMIN:        "CAP_MAC_ADMIN",
+		CAP_SYSLOG:           "CAP_SYSLOG",
+		CAP_WAKE_ALARM:       "CAP_WAKE_ALARM",
+		CAP_BLOCK_SUSPEND:    "CAP_BLOCK_SUSPEND",
+		CAP_AUDIT_READ:       "CAP_AUDIT_READ",
 	}
 
 	if name, ok := capNames[cap]; ok {
@@ -368,8 +521,6 @@ func capName(cap Capability) string {
 	}
 	return fmt.Sprintf("CAP_%d", cap)
 }
-
-
 
 func LogCaps(label string, cs *CapState) {
 	fmt.Printf("[%s] Caps PID=%d\n", label, cs.PID)
@@ -380,7 +531,6 @@ func LogCaps(label string, cs *CapState) {
 	fmt.Printf("  AMB=%016x\n", cs.Ambient)
 }
 
-
 func (c *CapState) View() CapView {
 	return CapView{
 		Bounding:    expandCaps(c.Bounding),
@@ -390,7 +540,6 @@ func (c *CapState) View() CapView {
 		Ambient:     expandCaps(c.Ambient),
 	}
 }
-
 
 func parseCapHex(s string) uint64 {
 	v, _ := strconv.ParseUint(s, 16, 64)
