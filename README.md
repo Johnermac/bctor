@@ -17,12 +17,11 @@ MOUNT
 
 PID
   |   set: CLONE_NEWPID
-  └─  it only apply to new processes, so we have to fork again (or use clone()) to create the granchild
+  └─  it only apply to new processes, so we have to unshare+fork (or use clone()) to create the granchild
 
     parent
       └─ child (unshare NEWPID)
             └─ grandchild (PID 1, exec here)
-
 
 IPC
   └─  set: CLONE_NEWIPC
@@ -32,5 +31,14 @@ NET
   └─  Bring up loopback for poc
 ```
 
-
 ---
+
+--- Capabilities ---
+
+in progress...
+
+```
+read caps from "/proc/<pid>/status" and compare with process before namespace isolation
+map caps that were added in NS
+remove and test each cap individually to show impact
+```

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type Capability int
@@ -240,10 +242,45 @@ func LogCapDelta(diffs []CapDiff) {
 		fmt.Printf("  -%-9s %s\n", capSetName(set), formatCaps(caps))
 	}
 }
+func DropCapability(cap Capability) error {
+	// 1. Bounding set
+	if err := unix.Prctl(
+		unix.PR_CAPBSET_DROP,
+		uintptr(cap),
+		0, 0, 0,
+	); err != nil {
+		return fmt.Errorf("prctl(PR_CAPBSET_DROP): %w", err)
+	}
+
+	// 2. Effective + Permitted
+	hdr := unix.CapUserHeader{
+		Version: unix.LINUX_CAPABILITY_VERSION_3,
+		Pid:     0,
+	}
+
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capget: %w", err)
+	}
+
+	idx := cap / 32
+	bit := uint(cap % 32)
+
+	data[idx].Effective &^= (1 << bit)
+	data[idx].Permitted &^= (1 << bit)
+
+	if err := unix.Capset(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("capset: %w", err)
+	}
+
+	return nil
+}
 
 
+// to do
 
-func ApplyCaps(plan CapPlan) error { return nil }
+
+//func ApplyCaps(plan CapPlan) error { return nil }
 //func ExplainCap(cap Capability) CapEffect {}
 
 func LogCapChange(diff CapDiff) {

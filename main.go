@@ -20,17 +20,15 @@ func main() {
 	}
 
 	// -------------------------------- PRINT PARENT
-
-	//os.Stdout.WriteString("=== NAMESPACES PARENT (Host) ===\n")
-	//pp := strconv.Itoa(os.Getpid())
+	
 	parentNS, _ := lib.ReadNamespaces(os.Getpid())
 	// optional debug
 	//lib.LogNamespacePosture("parent", parentNS)
 
-	capStateBefore, err := lib.ReadCaps(os.Getpid())
-	if err != nil {
-		os.Stdout.WriteString("Error in ReadCaps for PARENT: " + err.Error() + "\n")
-	}
+	//capStateBefore, err := lib.ReadCaps(os.Getpid())
+	//if err != nil {
+		//os.Stdout.WriteString("Error in ReadCaps for PARENT: " + err.Error() + "\n")
+	//}
 	//lib.LogCaps("PARENT", capStateBefore)
 	//lib.LogCapPosture("parent (initial)", capStateBefore)
 
@@ -63,23 +61,31 @@ func main() {
 			unix.Exit(1)
 		}
 
-		// -------------------------------- PRINT CHILD
-		//os.Stdout.WriteString("\n=== NAMESPACES CHILD (Container) ===\n")
-		//gp := strconv.Itoa(os.Getpid())
+		// -------------------------------- PRINT CHILD		
 		childNS, _ := lib.ReadNamespaces(os.Getpid())
 
 		nsdiff := lib.DiffNamespaces(parentNS, childNS)
 		lib.LogNamespaceDelta(nsdiff)
 
 		//optional debug
-		//lib.LogNamespacePosture("child", childNS)		
+		//lib.LogNamespacePosture("child", childNS)
+		
+		// -------------------------------- CAPABILITY PART
+		capStateBefore, err := lib.ReadCaps(os.Getpid())
+		if err != nil {
+			os.Stdout.WriteString("Error in ReadCaps for CHILD-before-cap-drop: " + err.Error() + "\n")
+		}
+
+		_ = lib.DropCapability(lib.CAP_SYS_ADMIN) // DROP
 
 		capStateAfter, err := lib.ReadCaps(os.Getpid())
 		if err != nil {
-			os.Stdout.WriteString("Error in ReadCaps for CHILD: " + err.Error() + "\n")
+			os.Stdout.WriteString("Error in ReadCaps for CHILD-after-cap-drop: " + err.Error() + "\n")
 		}
+		
 
 		diff := lib.DiffCaps(capStateBefore, capStateAfter)
+
 		if len(diff) > 0 {
 			lib.LogCapDelta(diff)
 		}
@@ -106,7 +112,7 @@ func main() {
 			path := "/bin/true"
 			err = unix.Exec(path, []string{path}, os.Environ())
 			if err != nil {
-				os.Stdout.WriteString("Error in unix.Exec PIDRoleContinue: " + err.Error() + "\n")
+				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
 			}
 		}
 	} else {
