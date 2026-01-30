@@ -431,8 +431,8 @@ func EnableAmbient(cap Capability) error {
 
 // to do
 
-//func ApplyCaps(plan CapPlan) error { return nil }
-//func ExplainCap(cap Capability) CapEffect {}
+
+
 
 // log
 
@@ -554,4 +554,77 @@ func expandCaps(mask uint64) CapSetView {
 	}
 
 	return out
+}
+
+// improve later with llm maybe
+
+func ExplainCap(cap Capability) CapEffect {
+	e := CapEffect{Cap: cap}
+
+	switch cap {
+
+	case CAP_SYS_ADMIN:
+		e.Enables = []string{
+			"mount and remount filesystems",
+			"pivot_root and namespace escape primitives",
+			"load/unload filesystem types",
+			"setns into arbitrary namespaces",
+			"bypass many LSM checks (de facto root)",
+		}
+		e.Disables = []string{
+			"filesystem and namespace confinement",
+		}
+
+	case CAP_NET_ADMIN:
+		e.Enables = []string{
+			"create raw sockets",
+			"configure interfaces and routing",
+			"add iptables / nftables rules",
+			"network namespace escape primitives",
+		}
+
+	case CAP_NET_BIND_SERVICE:
+		e.Enables = []string{
+			"bind to privileged ports (<1024)",
+		}
+
+	case CAP_SYS_PTRACE:
+		e.Enables = []string{
+			"attach to arbitrary processes",
+			"read/write process memory",
+			"credential theft via ptrace",
+		}
+		e.Disables = []string{
+			"process isolation",
+		}
+
+	case CAP_SETUID:
+		e.Enables = []string{
+			"change UID arbitrarily",
+			"assume identity of other users",
+		}
+
+	case CAP_SETGID:
+		e.Enables = []string{
+			"change GID arbitrarily",
+			"group-based privilege escalation",
+		}
+
+	case CAP_DAC_OVERRIDE:
+		e.Enables = []string{
+			"bypass file permission checks",
+		}
+
+	case CAP_SYS_CHROOT:
+		e.Enables = []string{
+			"call chroot (not real isolation)",
+		}
+
+	default:
+		e.Enables = []string{
+			"no high-risk primitive documented",
+		}
+	}
+
+	return e
 }

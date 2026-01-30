@@ -25,3 +25,16 @@ pidForCap, err := lib.NewFork()
 				//lib.LogCaps("CHILD", capStateChild)
 		}
 ```
+
+
+[note] how to call ExplainCap 
+
+```go
+for _, d := range diffs {
+	if d.To {
+		e := ExplainCap(d.Cap)
+		LogCapEffect(e) //finish this lkater
+	}
+}
+
+```

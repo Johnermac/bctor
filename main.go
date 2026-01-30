@@ -76,12 +76,12 @@ func main() {
 		}
 		lib.LogCaps("CHILD", capStateBefore)
 
-		//_ = lib.DropCapability(lib.CAP_SYS_ADMIN) // DROP
+		//_ = lib.DropCapability(lib.CAP_SETPCAP) // DROP
 		lib.DropAllExcept(lib.CAP_NET_BIND_SERVICE)
 		lib.SetCapabilities(lib.CAP_NET_BIND_SERVICE)
 		_ = lib.ClearAmbient()
 		_ = lib.AddInheritable(lib.CAP_NET_BIND_SERVICE)
-		_ = lib.RaiseAmbient(lib.CAP_NET_BIND_SERVICE)
+		//_ = lib.RaiseAmbient(lib.CAP_NET_BIND_SERVICE)
 
 		pidForCap, err := lib.NewFork()
 		if err != nil {
@@ -100,7 +100,7 @@ func main() {
 			path := "/bin/sh"
 
 			// print cap of new process
-			script := "echo '--- CAPS APÓS EXEC ---'; grep 'Cap' /proc/self/status; echo '-----------------------'"
+			script := "echo '--- CAPS after EXEC ---'; grep 'Cap' /proc/self/status; echo '-----------------------'"
 
 			args := []string{path, "-c", script}
 			
