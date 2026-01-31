@@ -100,8 +100,9 @@ func main() {
 		*/
 
 		
-
-		lib.TestFS()
+		if cfg.MOUNT {
+			lib.TestFS()
+		}
 
 		// -------------------------------- CAPABILITY PART
 		//lib.TestCap()

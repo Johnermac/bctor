@@ -151,7 +151,7 @@ func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig){
 		case PIDRoleInit, PIDRoleContinue:
 			path := "/bin/true"
 			err = unix.Exec(path, []string{path}, os.Environ())
-			if err != nil {
+			if err != nil && grandchildHostPid != 0 {
 				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
 			}
 		}
