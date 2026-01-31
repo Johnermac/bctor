@@ -84,13 +84,13 @@ func main() {
 
 		// parent waiting...		 
 
-    os.Stdout.WriteString("1\n")
+    os.Stdout.WriteString("\n1     - pipe handshake started with parent\n")
     unix.Write(c2p[1], []byte("G")) 
     
     buf := make([]byte, 1)
     unix.Read(p2c[0], buf) 
     
-    os.Stdout.WriteString("3\n") 	
+    os.Stdout.WriteString("3     - finished like chads\n") 	
 		
 		/*
 		lib.SetCapabilities(lib.CAP_SYS_ADMIN)
@@ -100,7 +100,7 @@ func main() {
 		*/
 
 		
-		if cfg.MOUNT {
+		if cfg.MOUNT {			
 			lib.TestFS()
 		}
 
@@ -126,7 +126,7 @@ func main() {
     buf := make([]byte, 1)
     unix.Read(c2p[0], buf)
 
-    os.Stdout.WriteString("2\n")
+    os.Stdout.WriteString("2     - ok buddy\n")
 
 		pidStr := strconv.Itoa(int(pid)) //child pid
 
@@ -136,7 +136,7 @@ func main() {
 			unix.Exit(1)
 		}
 
-		os.Stdout.WriteString("2-yey\n")
+		os.Stdout.WriteString("2-yey - parent set up user namespace and allowed continuation\n")
 		unix.Write(p2c[1], []byte("K"))
     
 

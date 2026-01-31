@@ -77,6 +77,63 @@ func SetupUserNamespace(pidStr string) error {
 	return nil
 }
 
+func HideProcPaths(paths []string) error {
+	for _, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			// Path might not exist in older kernels — ignore
+			continue
+		}
+
+		if st.IsDir() {
+			if err := hideDir(p); err != nil {
+				return fmt.Errorf("hide dir %s: %w", p, err)
+			}
+		} else {
+			if err := hideFile(p); err != nil {
+				return fmt.Errorf("hide file %s: %w", p, err)
+			}
+		}
+	}
+	return nil
+}
+
+
+func hideFile(path string) error {	
+	if err := unix.Mount("/dev/null", path, "", unix.MS_BIND, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
+func hideDir(path string) error {
+	if err := unix.Mount("tmpfs", path, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=0"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func callHideProc() {
+	hide := []string{
+		"/proc/kcore",
+		"/proc/keys",
+		"/proc/key-users",
+		"/proc/sysrq-trigger",
+		"/proc/latency_stats",
+		"/proc/timer_list",
+		"/proc/sched_debug",
+		"/proc/interrupts",
+		"/proc/slabinfo",
+		"/proc/meminfo",
+		"/proc/iomem",
+		"/proc/kallsyms",
+		"/proc/modules",
+	}
+
+	if err := HideProcPaths(hide); err != nil {
+		return 
+	}
+}
 
 
 
@@ -208,6 +265,42 @@ func MountVirtualFS(cfg FSConfig) error {
 		}
 	}
 
+	
+	if cfg.UseTmpfs {
+		writable := []string{"/tmp", "/run", "/var"}
+
+		for _, dir := range writable {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("mkdir %s failed: %w", dir, err)
+			}
+
+			if err := unix.Mount(
+				"tmpfs",
+				dir,
+				"tmpfs",
+				unix.MS_NOSUID|unix.MS_NODEV,
+				"size=64M",
+			); err != nil {
+				return fmt.Errorf("mount tmpfs on %s failed: %w", dir, err)
+			}
+		}
+	}
+
+	
+	if cfg.ReadOnly {
+		if err := unix.Mount(
+			"",
+			"/",
+			"",
+			unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_REC,
+			"",
+		); err != nil {
+			return fmt.Errorf("remount rootfs readonly failed: %w", err)
+		}
+	}
+
+
+
 	/*
 	if cfg.Dev {
 		if err := unix.Mount(
@@ -230,14 +323,15 @@ func MountVirtualFS(cfg FSConfig) error {
 
 
 
+
 func TestFS() {
 	fsCfg := FSConfig{
 		Rootfs:   "/dev/shm/bctor-root",
-		ReadOnly: false,
+		ReadOnly: false, // no permission, debug later
 		Proc:     true,
 		Sys:      true,
 		Dev:      true,
-		UseTmpfs: false,
+		UseTmpfs: true,
 	}
 
 	pid, err := NewFork()
@@ -246,8 +340,9 @@ func TestFS() {
 		return
 	}
 
+	
 	if pid == 0 {
-		// CHILD
+		// CHILD		
 
 		// 1. Prepare filesystem (mounts, bind, propagation)
 		if err := PrepareRoot(fsCfg); err != nil {
@@ -283,6 +378,8 @@ func TestFS() {
 			unix.Exit(127)
 		}
 			*/
+			
+		callHideProc()
 
 		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
 
