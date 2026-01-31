@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -25,7 +26,14 @@ type NamespaceConfig struct {
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
-	var flags int
+	var flags int	
+
+	if cfg.USER {
+		//flags |= unix.CLONE_NEWUSER
+		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
+			return err
+		}		
+	}
 
 	if cfg.UTS {
 		flags |= unix.CLONE_NEWUTS
@@ -38,10 +46,7 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	}
 	if cfg.NET {
 		flags |= unix.CLONE_NEWNET
-	}
-	if cfg.USER {
-		flags |= unix.CLONE_NEWUSER
-	}
+	}	
 	if cfg.IPC {
 		flags |= unix.CLONE_NEWIPC
 	}
@@ -125,4 +130,29 @@ func NewFork() (uintptr, error) {
 		return 0, err
 	}
 	return pid, nil
+}
+
+func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig){
+	role, grandchildHostPid, err := ResolvePIDNamespace(cfg.PID)
+		if err != nil {
+			os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
+			unix.Exit(1)
+		}
+
+		switch role {
+		case PIDRoleExit:
+			// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
+			grandchildNS, _ := ReadNamespaces(grandchildHostPid)
+			nsdiff := DiffNamespaces(parentNS, grandchildNS)
+			LogNamespaceDelta(nsdiff)
+			// optional
+			// lib.LogNamespacePosture("grand-child", grandchildNS)
+			unix.Exit(0)
+		case PIDRoleInit, PIDRoleContinue:
+			path := "/bin/true"
+			err = unix.Exec(path, []string{path}, os.Environ())
+			if err != nil {
+				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
+			}
+		}
 }

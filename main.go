@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"runtime"
+	"strconv"
 
 	"github.com/Johnermac/bctor/lib"
 	"golang.org/x/sys/unix"
@@ -11,10 +12,17 @@ import (
 func main() {
 	// Critical: prevent Go runtime thread migration before fork
 	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	// fd[0] is the read end, fd[1] is the write end
-	var fd [2]int
-	err := unix.Pipe2(fd[:], unix.O_CLOEXEC)
+	var p2c [2]int
+	err := unix.Pipe2(p2c[:], unix.O_CLOEXEC)
+	if err != nil {
+		panic(err)
+	}
+
+	var c2p [2]int
+	err = unix.Pipe2(c2p[:], unix.O_CLOEXEC)
 	if err != nil {
 		panic(err)
 	}
@@ -25,7 +33,7 @@ func main() {
 	// optional debug
 	//lib.LogNamespacePosture("parent", parentNS)
 
-	//capStateBefore, err := lib.ReadCaps(os.Getpid())
+	//capStateBefore, _ := lib.ReadCaps(os.Getpid())
 	//if err != nil {
 	//os.Stdout.WriteString("Error in ReadCaps for PARENT: " + err.Error() + "\n")
 	//}
@@ -43,16 +51,20 @@ func main() {
 		// Child path
 		// ----------------
 
-		unix.Close(fd[0])
+		unix.Close(p2c[1]) 
+    unix.Close(c2p[0])
 
 		cfg := lib.NamespaceConfig{
 			USER: true,
-			//MOUNT: true,
+			MOUNT: true,
 			//PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
 		}
+
+				
+		
 
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
@@ -67,103 +79,72 @@ func main() {
 		lib.LogNamespaceDelta(nsdiff)
 
 		//optional debug
-		//lib.LogNamespacePosture("child", childNS)
+		//lib.LogNamespacePosture("child", childNS)	
+
+
+		// parent waiting...		 
+
+    os.Stdout.WriteString("1\n")
+    unix.Write(c2p[1], []byte("G")) 
+    
+    buf := make([]byte, 1)
+    unix.Read(p2c[0], buf) 
+    
+    os.Stdout.WriteString("3\n") 	
+		
+		/*
+		lib.SetCapabilities(lib.CAP_SYS_ADMIN)
+		_ = lib.AddEffective(lib.CAP_SYS_ADMIN)
+		_ = lib.AddInheritable(lib.CAP_SYS_ADMIN)
+		_ = lib.AddPermitted(lib.CAP_SYS_ADMIN)
+		*/
+
+		
+
+		lib.TestFS()
 
 		// -------------------------------- CAPABILITY PART
-		capStateBefore, err := lib.ReadCaps(os.Getpid())
-		if err != nil {
-			os.Stdout.WriteString("Error in ReadCaps for CHILD-before-cap-drop: " + err.Error() + "\n")
-		}
-		lib.LogCaps("CHILD", capStateBefore)
-
-		//_ = lib.DropCapability(lib.CAP_SETPCAP) // DROP
-		lib.DropAllExcept(lib.CAP_NET_BIND_SERVICE)
-		lib.SetCapabilities(lib.CAP_NET_BIND_SERVICE)
-		_ = lib.ClearAmbient()
-		_ = lib.AddInheritable(lib.CAP_NET_BIND_SERVICE)
-		//_ = lib.RaiseAmbient(lib.CAP_NET_BIND_SERVICE)
-
-		pidForCap, err := lib.NewFork()
-		if err != nil {
-			os.Stdout.WriteString("Error in NewFork CHILD: " + err.Error() + "\n")
-		}
-
-		if pidForCap == 0 {
-			// Child branch
-			myPid := os.Getpid()
-			capStateChild, err := lib.ReadCaps(myPid)
-			if err != nil {
-				os.Stdout.WriteString("Error in ReadCaps for CHILD-after-cap-drop: " + err.Error() + "\n")
-			}
-			lib.LogCapPosture("grand-child (post-cap-ambient)", capStateChild)
-
-			path := "/bin/sh"
-
-			// print cap of new process
-			script := "echo '--- CAPS after EXEC ---'; grep 'Cap' /proc/self/status; echo '-----------------------'"
-
-			args := []string{path, "-c", script}
-			
-			err = unix.Exec(path, args, os.Environ())
-			if err != nil {
-				os.Stdout.WriteString("Erro no Exec: " + err.Error() + "\n")
-				unix.Exit(127)
-			}
-
-			os.Exit(0)
-		} else {			
-			//capStateChild, err := lib.ReadCaps(int(pidForCap))
-			//if err != nil {
-			//		os.Stdout.WriteString("Error in ReadCaps for CHILD-after-cap-drop: " + err.Error() + "\n")
-			//}
-			//lib.LogCaps("CHILD", capStateChild)
-		}
-
-		/*
-			diff := lib.DiffCaps(capStateBefore, capStateChild)
-
-					if len(diff) > 0 {
-						lib.LogCapDelta(diff)
-					}
-		*/
+		//lib.TestCap()
 
 		// optional for debug
 		//lib.LogCaps("CHILD", capStateAfter)
 		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)
-
-		role, grandchildHostPid, err := lib.ResolvePIDNamespace(cfg.PID)
-		if err != nil {
-			os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
-			unix.Exit(1)
+		if cfg.PID {
+			lib.TestPIDNS(parentNS, cfg)
 		}
-
-		switch role {
-		case lib.PIDRoleExit:
-			// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
-			grandchildNS, _ := lib.ReadNamespaces(grandchildHostPid)
-			nsdiff := lib.DiffNamespaces(parentNS, grandchildNS)
-			lib.LogNamespaceDelta(nsdiff)
-			// optional
-			// lib.LogNamespacePosture("grand-child", grandchildNS)
-			unix.Exit(0)
-		case lib.PIDRoleInit, lib.PIDRoleContinue:
-			path := "/bin/true"
-			err = unix.Exec(path, []string{path}, os.Environ())
-			if err != nil {
-				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
-			}
-		}
+		
 	} else {
 		// ----------------
 		// Parent path
 		// ----------------
-		unix.Close(fd[1]) // close write end
-		//pidStr := strconv.Itoa(int(pid)) child pid
+		
+		unix.Close(p2c[0]) // Pai só escreve no p2c
+    unix.Close(c2p[1]) // Pai só lê do c2p
+
+    // 1. Espera o Filho avisar que nasceu
+    buf := make([]byte, 1)
+    unix.Read(c2p[0], buf)
+
+    os.Stdout.WriteString("2\n")
+
+		pidStr := strconv.Itoa(int(pid)) //child pid
+
+		
+		if err := lib.SetupUserNamespace(pidStr); err != nil {
+			os.Stdout.WriteString("SetupUserNamespace failed: " + err.Error() + "\n")
+			unix.Exit(1)
+		}
+
+		os.Stdout.WriteString("2-yey\n")
+		unix.Write(p2c[1], []byte("K"))
+    
+
+		
 
 		// wait for EOF on pipe
-		buf := make([]byte, 1)
-		_, _ = unix.Read(fd[0], buf)
-		unix.Close(fd[0])
+		buf = make([]byte, 1)
+		_, _ = unix.Read(p2c[0], buf)
+		unix.Close(p2c[0])
 
 		// reap child
 		var status unix.WaitStatus

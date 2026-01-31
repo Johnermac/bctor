@@ -386,6 +386,14 @@ func AddPermitted(cap Capability) error {
 	})
 }
 
+func AddEffective(cap Capability) error {
+	return capSet(func(_ *unix.CapUserHeader, d []unix.CapUserData) {
+		idx := cap / 32
+		shift := cap % 32
+		d[idx].Effective |= 1 << shift
+	})
+}
+
 func AddInheritable(cap Capability) error {
 	return capSet(func(_ *unix.CapUserHeader, d []unix.CapUserData) {
 		idx := cap / 32
@@ -627,4 +635,49 @@ func ExplainCap(cap Capability) CapEffect {
 	}
 
 	return e
+}
+
+func TestCap() {
+	//_ = DropCapability(CAP_SETPCAP) // DROP
+		DropAllExcept(CAP_NET_BIND_SERVICE)
+		SetCapabilities(CAP_NET_BIND_SERVICE)
+		_ = ClearAmbient()
+		_ = AddInheritable(CAP_NET_BIND_SERVICE)
+		//_ = RaiseAmbient(CAP_NET_BIND_SERVICE)
+
+		pidForCap, err := NewFork()
+		if err != nil {
+			os.Stdout.WriteString("Error in NewFork CHILD: " + err.Error() + "\n")
+		}
+
+		if pidForCap == 0 {
+			// Child branch
+			myPid := os.Getpid()
+			capStateChild, err := ReadCaps(myPid)
+			if err != nil {
+				os.Stdout.WriteString("Error in ReadCaps for CHILD-after-cap-drop: " + err.Error() + "\n")
+			}
+			LogCapPosture("grand-child (post-cap-ambient)", capStateChild)
+
+			path := "/bin/sh"
+
+			// print cap of new process
+			script := "echo '--- CAPS after EXEC ---'; grep 'Cap' /proc/self/status; echo '-----------------------'"
+
+			args := []string{path, "-c", script}
+			
+			err = unix.Exec(path, args, os.Environ())
+			if err != nil {
+				os.Stdout.WriteString("Erro no Exec: " + err.Error() + "\n")
+				unix.Exit(127)
+			}
+
+			os.Exit(0)
+		} else {			
+			//capStateChild, err := lib.ReadCaps(int(pidForCap))
+			//if err != nil {
+			//		os.Stdout.WriteString("Error in ReadCaps for CHILD-after-cap-drop: " + err.Error() + "\n")
+			//}
+			//lib.LogCaps("CHILD", capStateChild)
+		}
 }
