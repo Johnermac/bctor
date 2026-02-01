@@ -35,8 +35,6 @@ NET
 
 --- Capabilities ---
 
-in progress...
-
 ```
  |  read caps from "/proc/<pid>/status" and compare with process before namespace isolation
  |  map caps that were added in NS
@@ -54,3 +52,33 @@ in progress...
  |  fork to create a grand-child
  └─ prepare and mount to finally create isolated file system (remember to fix some bugs)
 ```
+
+--- CGroups ---
+
+```
+ |  we have to apply the controls in /sys/fs/cgroup (vfs)
+ |  each folder that we create inside its a "group of control" (container) 
+ |  and each file inside the folder is a config (metric)
+ |  it follows the hierarchy, thats why we apply in the child and the limitations are in the grand-child
+ |  cgroup.controllers are the "reader" that says which "powers" that kernel made available to me
+ |  cgroup.subtree_control is the gate, its where u enable the "powers" to your children (processes)
+ └─  then write the PID to cgroup.procs, and define the limitations of memory, cpu etc
+ 
+ [!] there are a lot of more details that docker (for example), implements like cgroup.events, cgroup.freeze etc 
+    Ill focus on that in another project tho
+ [!] must be run with root in host cause we need to have control over /sys/fs/cgroup dir  
+ [!] set the cgroup NS (AFTER u apply the cgroup configs) with the flag CLONE_NEWCGROUP, to limit the visibility of the container over the host
+```
+
+--- Seccomp ---
+
+in progress
+
+--- todo ---
+
+- add cfg namespaces as parameters
+- fix bugs in caps and file system
+- finish file system ReadOnly
+- fix mount of proc and sys (have no idea how to do that, I think its a limitation of WSL)
+- remove comments 
+- improve output of diffs for better readability

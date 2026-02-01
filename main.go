@@ -57,7 +57,8 @@ func main() {
 		cfg := lib.NamespaceConfig{
 			USER: true,
 			MOUNT: true,
-			PID: true,
+			//CGROUP: true,
+			//PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
@@ -84,23 +85,16 @@ func main() {
 
 		// parent waiting...		 
 
-    os.Stdout.WriteString("\n1     - pipe handshake started with parent\n")
+    os.Stdout.WriteString("\n[*] 1     - pipe handshake started with parent\n")
     unix.Write(c2p[1], []byte("G")) 
     
     buf := make([]byte, 1)
     unix.Read(p2c[0], buf) 
     
-    os.Stdout.WriteString("3     - finished like chads\n") 	
+    os.Stdout.WriteString("[*] 3     - finished like chads\n") 	
 		
-		/*
 		
-		lib.SetCapabilities(lib.CAP_SYS_ADMIN)
-	_ = lib.AddEffective(lib.CAP_SYS_ADMIN)
-	_ = lib.AddInheritable(lib.CAP_SYS_ADMIN)
-	_ = lib.AddPermitted(lib.CAP_SYS_ADMIN)
-	_ = lib.RaiseAmbient(lib.CAP_SYS_ADMIN)
-*/
-		lib.TestCgroups()
+		lib.TestCgroups(cfg)
 		os.Stdout.WriteString("[*] TestCgroups")
 		
 		if cfg.MOUNT {			
@@ -131,7 +125,7 @@ func main() {
     buf := make([]byte, 1)
     unix.Read(c2p[0], buf)
 
-    os.Stdout.WriteString("2     - ok buddy\n")
+    os.Stdout.WriteString("[*] 2     - ok buddy\n")
 
 		pidStr := strconv.Itoa(int(pid)) //child pid
 
@@ -141,7 +135,7 @@ func main() {
 			unix.Exit(1)
 		}
 
-		os.Stdout.WriteString("2-yey - parent set up user namespace and allowed continuation\n")
+		os.Stdout.WriteString("[*] 2-yey - parent set up user namespace and allowed continuation\n")
 		unix.Write(p2c[1], []byte("K"))
     
 

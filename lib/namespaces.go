@@ -17,12 +17,13 @@ const (
 )
 
 type NamespaceConfig struct {
-	UTS   bool
-	MOUNT bool
-	PID   bool
-	NET   bool
-	USER  bool
-	IPC   bool
+	UTS   	bool
+	MOUNT 	bool
+	PID   	bool
+	NET   	bool
+	USER 		bool
+	IPC   	bool
+	CGROUP 	bool
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
@@ -49,7 +50,7 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	}	
 	if cfg.IPC {
 		flags |= unix.CLONE_NEWIPC
-	}
+	}	
 
 	if flags == 0 {
 		return nil
