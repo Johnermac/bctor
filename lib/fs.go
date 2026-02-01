@@ -38,8 +38,7 @@ type FSMount struct {
 func ApplyFilesystem(cfg FSConfig) error
 
 //tests
-func PrepareRoot(cfg FSConfig) error  - done
-func PivotRoot(newRoot string) error - done
+
 func MountSpecials(cfg FSConfig) error
 func RemountReadOnly(cfg FSConfig) error
 func VerifyNoHostLeak() error
@@ -342,7 +341,7 @@ func TestFS() {
 
 	
 	if pid == 0 {
-		// CHILD		
+		// GRAND-CHILD		
 
 		// 1. Prepare filesystem (mounts, bind, propagation)
 		if err := PrepareRoot(fsCfg); err != nil {
@@ -380,6 +379,7 @@ func TestFS() {
 			*/
 			
 		callHideProc()
+		fmt.Println("[*] callHideProc")		
 
 		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
 

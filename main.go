@@ -57,7 +57,7 @@ func main() {
 		cfg := lib.NamespaceConfig{
 			USER: true,
 			MOUNT: true,
-			//PID: true,
+			PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
@@ -93,16 +93,21 @@ func main() {
     os.Stdout.WriteString("3     - finished like chads\n") 	
 		
 		/*
+		
 		lib.SetCapabilities(lib.CAP_SYS_ADMIN)
-		_ = lib.AddEffective(lib.CAP_SYS_ADMIN)
-		_ = lib.AddInheritable(lib.CAP_SYS_ADMIN)
-		_ = lib.AddPermitted(lib.CAP_SYS_ADMIN)
-		*/
-
+	_ = lib.AddEffective(lib.CAP_SYS_ADMIN)
+	_ = lib.AddInheritable(lib.CAP_SYS_ADMIN)
+	_ = lib.AddPermitted(lib.CAP_SYS_ADMIN)
+	_ = lib.RaiseAmbient(lib.CAP_SYS_ADMIN)
+*/
+		lib.TestCgroups()
+		os.Stdout.WriteString("[*] TestCgroups")
 		
 		if cfg.MOUNT {			
 			lib.TestFS()
 		}
+
+		
 
 		// -------------------------------- CAPABILITY PART
 		//lib.TestCap()
@@ -111,7 +116,7 @@ func main() {
 		//lib.LogCaps("CHILD", capStateAfter)
 		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)
 		if cfg.PID {
-			lib.TestPIDNS(parentNS, cfg)
+			//lib.TestPIDNS(parentNS, cfg)
 		}
 		
 	} else {
