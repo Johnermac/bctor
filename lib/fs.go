@@ -134,6 +134,12 @@ func callHideProc() {
 	}
 }
 
+// little helper
+func copyFile(src, dst string) error {
+    data, err := os.ReadFile(src)
+    if err != nil { return err }
+    return os.WriteFile(dst, data, 0755)
+}
 
 
 func PrepareRoot(cfg FSConfig) error {
@@ -142,16 +148,17 @@ func PrepareRoot(cfg FSConfig) error {
 		return fmt.Errorf("make / private: %w", err)
 	}
 
-	// 2. Validate rootfs
-	st, err := os.Stat(cfg.Rootfs)
+	// 2. Bind-mount rootfs onto itself (required for pivot_root)
+
+	if err := os.MkdirAll(cfg.Rootfs, 0755); err != nil {
+		return fmt.Errorf("failed to create rootfs dir: %w", err)
+	}	
+
+	_, err := os.Stat(cfg.Rootfs)
 	if err != nil {
 		return fmt.Errorf("rootfs stat: %w", err)
 	}
-	if !st.IsDir() {
-		return fmt.Errorf("rootfs is not a directory")
-	}	
 
-	// 3. Bind-mount rootfs onto itself (required for pivot_root)
 	if err := unix.Mount(
 		cfg.Rootfs,
 		cfg.Rootfs,
@@ -162,7 +169,7 @@ func PrepareRoot(cfg FSConfig) error {
 		return fmt.Errorf("bind rootfs: %w", err)
 	}
 
-	// 4. Make rootfs mount private explicitly
+	// 3. Make rootfs mount private explicitly
 	if err := unix.Mount(
 		"",
 		cfg.Rootfs,
@@ -172,6 +179,28 @@ func PrepareRoot(cfg FSConfig) error {
 	); err != nil {
 		return fmt.Errorf("make rootfs private: %w", err)
 	}
+
+	// 4. setup busybox shell		
+	
+	binDir := filepath.Join(cfg.Rootfs, "bin")
+  os.MkdirAll(binDir, 0755)
+    
+	busyboxDest := filepath.Join(binDir, "busybox")
+	if _, err := os.Stat(busyboxDest); os.IsNotExist(err) {
+			input, _ := os.ReadFile("/bin/busybox")
+			os.WriteFile(busyboxDest, input, 0755)
+			
+			f, _ := os.Open(busyboxDest)
+			f.Sync() 
+			f.Close()
+	}
+	
+	for _, cmd := range []string{"sh", "ls"} {
+			target := filepath.Join(binDir, cmd)
+			os.Remove(target) 
+			os.Symlink("busybox", target)
+	}	
+	
 
 	// 5. Prepare /dev and bind host devices
 	devPath := filepath.Join(cfg.Rootfs, "dev")
@@ -319,13 +348,9 @@ func MountVirtualFS(cfg FSConfig) error {
 	return nil
 }
 
-
-
-
-
 func TestFS() {
 	fsCfg := FSConfig{
-		Rootfs:   "/dev/shm/bctor-root",
+		Rootfs:   "/dev/shm/bctor-root", 
 		ReadOnly: false, // no permission, debug later
 		Proc:     true,
 		Sys:      true,

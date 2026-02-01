@@ -93,7 +93,7 @@ func flagsChecks(cfg NamespaceConfig) error {
 		// interfaces
 		links, _ := netlink.LinkList()
 		for _, l := range links {
-			fmt.Printf("%v: %v\n", l.Attrs().Name, l.Attrs().Flags)
+			fmt.Printf("[*] %v: %v\n", l.Attrs().Name, l.Attrs().Flags)
 		}
 	}
 
@@ -133,6 +133,10 @@ func NewFork() (uintptr, error) {
 	return pid, nil
 }
 
+func (c NamespaceConfig) AnyEnabled() bool {
+	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
+}
+
 func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig){
 	role, grandchildHostPid, err := ResolvePIDNamespace(cfg.PID)
 		if err != nil {
@@ -148,7 +152,7 @@ func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig){
 			LogNamespaceDelta(nsdiff)
 			// optional
 			// lib.LogNamespacePosture("grand-child", grandchildNS)
-			unix.Exit(0)
+			//unix.Exit(0)
 		case PIDRoleInit, PIDRoleContinue:
 			path := "/bin/true"
 			err = unix.Exec(path, []string{path}, os.Environ())

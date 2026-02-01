@@ -42,7 +42,7 @@ unix.Write(c2p[1], []byte("G"))
 buf := make([]byte, 1)
 unix.Read(p2c[0], buf) 
     
-os.Stdout.WriteString("3\n") 
+os.Stdout.WriteString("4\n") 
 ```
 
 parent
@@ -64,6 +64,6 @@ if err := lib.SetupUserNamespace(pidStr); err != nil {
 	unix.Exit(1)
 }
 
-os.Stdout.WriteString("2-yey\n")
+os.Stdout.WriteString("3\n")
 unix.Write(p2c[1], []byte("K"))
 ```

@@ -82,3 +82,4 @@ in progress
 - fix mount of proc and sys (have no idea how to do that, I think its a limitation of WSL)
 - remove comments 
 - improve output of diffs for better readability
+- in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping

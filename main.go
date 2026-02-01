@@ -57,15 +57,12 @@ func main() {
 		cfg := lib.NamespaceConfig{
 			USER: true,
 			MOUNT: true,
-			//CGROUP: true,
+			//CGROUP: true, //needs root cause /sys/fs/cgroup
 			//PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
-		}
-
-				
-		
+		}		
 
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
@@ -74,10 +71,13 @@ func main() {
 		}
 
 		// -------------------------------- PRINT CHILD
-		childNS, _ := lib.ReadNamespaces(os.Getpid())
-
-		nsdiff := lib.DiffNamespaces(parentNS, childNS)
-		lib.LogNamespaceDelta(nsdiff)
+		if cfg.AnyEnabled() {
+			os.Stdout.WriteString("\n[*] Compare Namespaces PARENT-CHILD\n")
+			childNS, _ := lib.ReadNamespaces(os.Getpid())
+			nsdiff := lib.DiffNamespaces(parentNS, childNS)
+			lib.LogNamespaceDelta(nsdiff)
+		}
+		
 
 		//optional debug
 		//lib.LogNamespacePosture("child", childNS)	
@@ -85,22 +85,28 @@ func main() {
 
 		// parent waiting...		 
 
-    os.Stdout.WriteString("\n[*] 1     - pipe handshake started with parent\n")
+    os.Stdout.WriteString("\n[*] 1 - pipe handshake started with parent\n")
     unix.Write(c2p[1], []byte("G")) 
     
     buf := make([]byte, 1)
     unix.Read(p2c[0], buf) 
     
-    os.Stdout.WriteString("[*] 3     - finished like chads\n") 	
+    os.Stdout.WriteString("[*] 4 - finished like chads\n") 	
 		
+		if cfg.CGROUP {
+			os.Stdout.WriteString("[*] TestCgroups\n")
+			lib.TestCgroups(cfg)		
+		}	
+
+		if cfg.PID {
+			os.Stdout.WriteString("\n[*] Compare Namespaces PARENT-GRANDCHILD\n")
+			lib.TestPIDNS(parentNS, cfg)
+		}	
 		
-		lib.TestCgroups(cfg)
-		os.Stdout.WriteString("[*] TestCgroups")
-		
-		if cfg.MOUNT {			
+		if cfg.MOUNT {		
+			os.Stdout.WriteString("[*] TestFS\n")	
 			lib.TestFS()
 		}
-
 		
 
 		// -------------------------------- CAPABILITY PART
@@ -109,9 +115,7 @@ func main() {
 		// optional for debug
 		//lib.LogCaps("CHILD", capStateAfter)
 		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)
-		if cfg.PID {
-			//lib.TestPIDNS(parentNS, cfg)
-		}
+		
 		
 	} else {
 		// ----------------
@@ -125,17 +129,18 @@ func main() {
     buf := make([]byte, 1)
     unix.Read(c2p[0], buf)
 
-    os.Stdout.WriteString("[*] 2     - ok buddy\n")
+    os.Stdout.WriteString("[*] 2 - ok buddy\n")
+
 
 		pidStr := strconv.Itoa(int(pid)) //child pid
 
 		
 		if err := lib.SetupUserNamespace(pidStr); err != nil {
-			os.Stdout.WriteString("SetupUserNamespace failed: " + err.Error() + "\n")
+			os.Stdout.WriteString("[?] X - Error SetupUserNamespace: " + err.Error() + "\n")
 			unix.Exit(1)
 		}
 
-		os.Stdout.WriteString("[*] 2-yey - parent set up user namespace and allowed continuation\n")
+		os.Stdout.WriteString("[*] 3 - parent set up user namespace and allowed continuation\n")
 		unix.Write(p2c[1], []byte("K"))
     
 
