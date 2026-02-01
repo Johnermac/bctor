@@ -29,6 +29,10 @@ IPC
 NET
   |   set: CLONE_NEWNET
   └─  Bring up loopback for poc
+
+CGROUP
+  |   set: CLONE_NEWCGROUP
+  └─  it hides information about other processes
 ```
 
 ---
@@ -56,18 +60,18 @@ NET
 --- CGroups ---
 
 ```
- |  we have to apply the controls in /sys/fs/cgroup (vfs)
- |  each folder that we create inside its a "group of control" (container) 
- |  and each file inside the folder is a config (metric)
- |  it follows the hierarchy, thats why we apply in the child and the limitations are in the grand-child
- |  cgroup.controllers are the "reader" that says which "powers" that kernel made available to me
- |  cgroup.subtree_control is the gate, its where u enable the "powers" to your children (processes)
+ |   we have to apply the controls in /sys/fs/cgroup (vfs) its kernel’s interface to resource control
+ |   each folder that we create inside its a "group of control" (container) 
+ |   and each file inside the folder is a config (metric)
+ |   it follows the hierarchy, thats why we apply in the child and the limitations are in the grand-child
+ |   cgroup.controllers are the "reader" that says which "powers" that kernel made available
+ |   cgroup.subtree_control is the gate, its where u enable the "powers" to your children (processes)
  └─  then write the PID to cgroup.procs, and define the limitations of memory, cpu etc
  
  [!] there are a lot of more details that docker (for example), implements like cgroup.events, cgroup.freeze etc 
     Ill focus on that in another project tho
  [!] must be run with root in host cause we need to have control over /sys/fs/cgroup dir  
- [!] set the cgroup NS (AFTER u apply the cgroup configs) with the flag CLONE_NEWCGROUP, to limit the visibility of the container over the host
+ [!] set the cgroup NS (AFTER u apply the cgroup configs) with the flag CLONE_NEWCGROUP, to limit the visibility of the container over the host 
 ```
 
 --- Seccomp ---

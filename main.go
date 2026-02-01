@@ -55,7 +55,7 @@ func main() {
     unix.Close(c2p[0])
 
 		cfg := lib.NamespaceConfig{
-			USER: true,
+			USER: true, //almost everything needs this enabled
 			MOUNT: true,
 			//CGROUP: true, //needs root cause /sys/fs/cgroup
 			//PID: true,
