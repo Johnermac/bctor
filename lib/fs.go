@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -408,14 +409,22 @@ func TestFS() {
 				
 		fmt.Println("[*] ApplySeccomp")
 
-		err = ApplySeccomp(ProfileShellMinimal)
+		profile := ProfileHello //set to arg in the future
+
+		err = ApplySeccomp(profile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
 		}
-		fmt.Println("[*] Final shell")
+		fmt.Println("[*] Profile loaded")
 
-		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
-
+		if profile == ProfileDebugShell { _ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"}) }
+		
+		if profile == ProfileHello {
+			message := "\n[!] Hello Seccomp!\n"
+			syscall.Write(1, []byte(message))		
+			syscall.Exit(0)
+		}
+		
 
 		// unreachable
 		unix.Exit(0)

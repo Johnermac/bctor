@@ -11,8 +11,16 @@
 #define __NR_seccomp 317
 #endif
 
-int install_shell_minimal(void) {
-    return install_filter(filter, (unsigned short)filter_len);
+int install_hello(void) {
+    return install_filter(filter_hello, len_hello);
+}
+
+int install_init(void) {
+    return install_filter(filter_init, len_init);
+}
+
+int install_debug_shell(void) {
+    return install_filter(filter_debug, len_debug);
 }
 
 int install_filter(struct sock_filter *filter, size_t count) {

@@ -5,15 +5,38 @@
 #include <sys/syscall.h>     // for SYS_read, SYS_write, etc.
 #include "rules.h"           // your ALLOW_SYSCALL, KILL_PROCESS macros
 
-struct sock_filter filter[] = {
-    // arch check
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
-    KILL_PROCESS,
 
-    // syscall number
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+#define VALIDATE_ARCH \
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)), \
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0), \
+    KILL_PROCESS, \
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr))
 
+
+// --- Perfil Minimal    
+struct sock_filter filter_hello[] = {
+    VALIDATE_ARCH,
+    ALLOW_SYSCALL(write),
+    ALLOW_SYSCALL(exit),
+    ALLOW_SYSCALL(exit_group),
+    ALLOW_SYSCALL(rt_sigreturn),
+    KILL_PROCESS
+};
+    
+// --- Perfil Init
+struct sock_filter filter_init[] = {
+    VALIDATE_ARCH,
+    ALLOW_SYSCALL(mount),
+    ALLOW_SYSCALL(umount2),
+    ALLOW_SYSCALL(pivot_root),
+    ALLOW_SYSCALL(chroot),
+    ALLOW_SYSCALL(exit),
+    
+    KILL_PROCESS
+};
+
+struct sock_filter filter_debug[] = {    
+    VALIDATE_ARCH,
     ALLOW_SYSCALL(execve),
     ALLOW_SYSCALL(brk),
     ALLOW_SYSCALL(mmap),
@@ -39,17 +62,14 @@ struct sock_filter filter[] = {
     ALLOW_SYSCALL(setuid),     // Comum em setups de privilégios
     ALLOW_SYSCALL(setgroups),  // Comum em setups de privilégios    
     ALLOW_SYSCALL(set_robust_list), // A que causou o crash (SYS_set_robust_list)
-    
     ALLOW_SYSCALL(capget),         // Shells checam capacidades (SYS_capget)
     ALLOW_SYSCALL(capset),
     ALLOW_SYSCALL(set_robust_list),
     ALLOW_SYSCALL(rseq),           // A que causou o crash (SYS_rseq)
-    
     ALLOW_SYSCALL(uname),          // A que causou o crash agora
     ALLOW_SYSCALL(stat),           // Checar arquivos
     ALLOW_SYSCALL(lstat),          // Checar links simbólicos
     ALLOW_SYSCALL(readlink),       // Ler caminhos de links
-    
     ALLOW_SYSCALL(pipe),           // Shell usa pipes para comandos
     ALLOW_SYSCALL(pipe2),          // Versão moderna do pipe
     ALLOW_SYSCALL(wait4),          // Shell precisa esperar os comandos terminarem
@@ -77,8 +97,7 @@ struct sock_filter filter[] = {
     ALLOW_SYSCALL(dup2),
     ALLOW_SYSCALL(dup3),   
     /* Gerenciamento de Processos e Finalização */
-    ALLOW_SYSCALL(exit_group),     // OBRIGATÓRIO para processos filhos terminarem
-       
+    ALLOW_SYSCALL(exit_group),     // OBRIGATÓRIO para processos filhos terminarem 
     /* Navegação e Sistema de Arquivos */
     ALLOW_SYSCALL(lseek),          // ps e id usam para ler arquivos de sistema/config
     ALLOW_SYSCALL(readlinkat),     // Algumas versões de ls/ps precisam
@@ -86,13 +105,10 @@ struct sock_filter filter[] = {
     ALLOW_SYSCALL(socket),         // id usa para nscd (Name Service Cache Daemon)
     ALLOW_SYSCALL(connect),        // id usa para nscd
     ALLOW_SYSCALL(futex),
-
-
-
-
-    // …
-
+    // … find with strace -f ./bctor
     KILL_PROCESS,
 };
 
-unsigned int filter_len = sizeof(filter) / sizeof(filter[0]);
+unsigned short len_hello = sizeof(filter_hello) / sizeof(filter_hello[0]);
+unsigned short len_init = sizeof(filter_init) / sizeof(filter_init[0]);
+unsigned short len_debug = sizeof(filter_debug) / sizeof(filter_debug[0]);

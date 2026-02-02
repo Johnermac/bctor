@@ -11,18 +11,27 @@ import "fmt"
 type Profile int
 
 const (
-    ProfileShellMinimal Profile = iota
+	ProfileDebugShell Profile = iota // busybox /bin/sh
+	ProfileInit                      // setup-only (mount, pivot, cgroup)
+	ProfileHello                     // minimal hello-world
 )
 
 func ApplySeccomp(p Profile) error {
-    switch p {
-    case ProfileShellMinimal:
-        rc := C.install_shell_minimal()
-        if rc != 0 {
-            return fmt.Errorf("seccomp install failed: return code %d", rc)
-        }
-    default:
-        return fmt.Errorf("unknown seccomp profile")
-    }
-    return nil
+	var rc C.int
+
+	switch p {
+	case ProfileDebugShell:
+		rc = C.install_debug_shell()
+	case ProfileInit:
+		rc = C.install_init()
+	case ProfileHello:
+		rc = C.install_hello()
+	default:
+		return fmt.Errorf("unknown seccomp profile")
+	}
+
+	if rc != 0 {
+		return fmt.Errorf("seccomp install failed: rc=%d", rc)
+	}
+	return nil
 }
