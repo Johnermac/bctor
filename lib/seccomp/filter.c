@@ -1,3 +1,10 @@
+#include <stddef.h>          // for offsetof
+#include <linux/seccomp.h>   // for struct seccomp_data
+#include <linux/filter.h>    // for struct sock_filter, BPF_STMT, BPF_JUMP, etc.
+#include <linux/audit.h>     // for AUDIT_ARCH_X86_64
+#include <sys/syscall.h>     // for SYS_read, SYS_write, etc.
+#include "rules.h"           // your ALLOW_SYSCALL, KILL_PROCESS macros
+
 struct sock_filter filter[] = {
     // arch check
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
@@ -16,3 +23,5 @@ struct sock_filter filter[] = {
 
     KILL_PROCESS,
 };
+
+unsigned int filter_len = sizeof(filter) / sizeof(filter[0]);
