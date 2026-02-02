@@ -412,6 +412,7 @@ func TestFS() {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
 		}
+		fmt.Println("[*] Final shell")
 
 		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
 
