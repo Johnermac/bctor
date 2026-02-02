@@ -77,6 +77,11 @@ CGROUP
 --- Seccomp ---
 
 in progress
+```
+ | seccomp basically defines what the process is allowed to "say" to the kernel
+ | its a BPF bytecode, so we will use C for this one cause I wanna avoid too much abstraction
+
+```
 
 --- todo ---
 
@@ -87,3 +92,5 @@ in progress
 - remove comments 
 - improve output of diffs for better readability
 - in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping
+- implement PTY attach to control multiples containers
+- improve folders layout

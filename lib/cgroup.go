@@ -204,6 +204,14 @@ func CheckCgroupV2() error {
 	return nil
 }
 
+func SetCgroupFreeze(cgPath string, freeze bool) error {
+	val := "0"
+	if freeze {
+		val = "1"
+	}
+	return os.WriteFile(filepath.Join(cgPath, "cgroup.freeze"), []byte(val), 0644)
+}
+
 
 func EnableControllers(root string, ctrls []string) error {
 	data := "+" + strings.Join(ctrls, " +")

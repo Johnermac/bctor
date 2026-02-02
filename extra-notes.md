@@ -67,3 +67,21 @@ if err := lib.SetupUserNamespace(pidStr); err != nil {
 os.Stdout.WriteString("3\n")
 unix.Write(p2c[1], []byte("K"))
 ```
+
+
+freeze setup
+it should be applied by the parent of the process. 
+it "disables" the cgroup limitations applied
+gonna use this for debug only
+
+```go
+// freeze
+if err := SetCgroupFreeze(Rootfs, true); err != nil {
+	log.Fatal(err)
+}
+
+// unfreeze
+if err := SetCgroupFreeze(Rootfs, false); err != nil {
+	log.Fatal(err)
+}
+```

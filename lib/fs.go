@@ -402,9 +402,16 @@ func TestFS() {
 			unix.Exit(127)
 		}
 			*/
-			
+		
+		fmt.Println("[*] callHideProc")
 		callHideProc()
-		fmt.Println("[*] callHideProc")		
+				
+		fmt.Println("[*] ApplySeccomp")
+
+		err = ApplySeccomp(ProfileShellMinimal)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
+		}
 
 		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
 
