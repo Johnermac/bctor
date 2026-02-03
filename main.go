@@ -51,19 +51,20 @@ func main() {
 		// Child path
 		// ----------------
 
-		unix.Close(p2c[1]) 
-    unix.Close(c2p[0])
+		unix.Close(p2c[1])
+		unix.Close(c2p[0])
 
 		cfg := lib.NamespaceConfig{
-			USER: true, //almost everything needs this enabled
+			USER:  true, //almost everything needs this enabled
 			MOUNT: true,
 			//CGROUP: true, //needs root cause /sys/fs/cgroup
 			//PID: true,
 			//UTS: true,
 			//NET: true,
 			//IPC: true,
-		}		
+		}
 
+		os.Stdout.WriteString("[*] Apply Namespaces\n")
 		err := lib.ApplyNamespaces(cfg)
 		if err != nil {
 			os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
@@ -77,64 +78,54 @@ func main() {
 			nsdiff := lib.DiffNamespaces(parentNS, childNS)
 			lib.LogNamespaceDelta(nsdiff)
 		}
-		
 
 		//optional debug
-		//lib.LogNamespacePosture("child", childNS)	
+		//lib.LogNamespacePosture("child", childNS)
 
+		// parent waiting...
 
-		// parent waiting...		 
+		os.Stdout.WriteString("\n[*] 1 - pipe handshake started with parent\n")
+		unix.Write(c2p[1], []byte("G"))
 
-    os.Stdout.WriteString("\n[*] 1 - pipe handshake started with parent\n")
-    unix.Write(c2p[1], []byte("G")) 
-    
-    buf := make([]byte, 1)
-    unix.Read(p2c[0], buf) 
-    
-    os.Stdout.WriteString("[*] 4 - finished like chads\n") 	
-		
+		buf := make([]byte, 1)
+		unix.Read(p2c[0], buf)
+
+		os.Stdout.WriteString("[*] 4 - finished like chads\n")
+
 		if cfg.CGROUP {
-			os.Stdout.WriteString("[*] TestCgroups\n")
-			lib.TestCgroups(cfg)		
-		}	
+			os.Stdout.WriteString("[*] CGroup\n")
+			lib.TestCgroups(cfg)
+		}
 
 		if cfg.PID {
 			os.Stdout.WriteString("\n[*] Compare Namespaces PARENT-GRANDCHILD\n")
 			lib.TestPIDNS(parentNS, cfg)
-		}	
-		
-		if cfg.MOUNT {		
-			os.Stdout.WriteString("[*] TestFS\n")	
-			lib.TestFS()
 		}
-		
 
-		// -------------------------------- CAPABILITY PART
-		//lib.TestCap()
+		os.Stdout.WriteString("[*] Drop Capabilities\n")
+		lib.TestCap()
 
-		// optional for debug
-		//lib.LogCaps("CHILD", capStateAfter)
-		//lib.LogCapPosture("child (post-namespaces)", capStateAfter)
-		
-		
+		if cfg.MOUNT {
+			os.Stdout.WriteString("[*] File System\n")
+			lib.TestFS("/dev/shm/bctor-root")
+		}		
+
 	} else {
 		// ----------------
 		// Parent path
 		// ----------------
-		
+
 		unix.Close(p2c[0]) // Pai só escreve no p2c
-    unix.Close(c2p[1]) // Pai só lê do c2p
+		unix.Close(c2p[1]) // Pai só lê do c2p
 
-    // 1. Espera o Filho avisar que nasceu
-    buf := make([]byte, 1)
-    unix.Read(c2p[0], buf)
+		// 1. Espera o Filho avisar que nasceu
+		buf := make([]byte, 1)
+		unix.Read(c2p[0], buf)
 
-    os.Stdout.WriteString("[*] 2 - ok buddy\n")
-
+		os.Stdout.WriteString("[*] 2 - ok buddy\n")
 
 		pidStr := strconv.Itoa(int(pid)) //child pid
 
-		
 		if err := lib.SetupUserNamespace(pidStr); err != nil {
 			os.Stdout.WriteString("[?] X - Error SetupUserNamespace: " + err.Error() + "\n")
 			unix.Exit(1)
@@ -142,9 +133,6 @@ func main() {
 
 		os.Stdout.WriteString("[*] 3 - parent set up user namespace and allowed continuation\n")
 		unix.Write(p2c[1], []byte("K"))
-    
-
-		
 
 		// wait for EOF on pipe
 		buf = make([]byte, 1)

@@ -12,7 +12,7 @@ type Profile int
 
 const (
 	ProfileDebugShell Profile = iota // busybox /bin/sh
-	ProfileInit                      // setup-only (mount, pivot, cgroup)
+	ProfileWorkload                  // open port with nc
 	ProfileHello                     // minimal hello-world
 )
 
@@ -22,8 +22,8 @@ func ApplySeccomp(p Profile) error {
 	switch p {
 	case ProfileDebugShell:
 		rc = C.install_debug_shell()
-	case ProfileInit:
-		rc = C.install_init()
+	case ProfileWorkload:
+		rc = C.install_workload()
 	case ProfileHello:
 		rc = C.install_hello()
 	default:

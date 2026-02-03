@@ -23,15 +23,45 @@ struct sock_filter filter_hello[] = {
     KILL_PROCESS
 };
     
-// --- Perfil Init
-struct sock_filter filter_init[] = {
+// --- Perfil Workload
+struct sock_filter filter_workload[] = {
     VALIDATE_ARCH,
-    ALLOW_SYSCALL(mount),
-    ALLOW_SYSCALL(umount2),
-    ALLOW_SYSCALL(pivot_root),
-    ALLOW_SYSCALL(chroot),
-    ALLOW_SYSCALL(exit),
-    
+    /* Runtime Go e Loader */
+    ALLOW_SYSCALL(write),
+    ALLOW_SYSCALL(prlimit64),
+    ALLOW_SYSCALL(execve),
+    ALLOW_SYSCALL(arch_prctl),
+    ALLOW_SYSCALL(brk),
+    ALLOW_SYSCALL(set_tid_address),
+    ALLOW_SYSCALL(set_robust_list),
+    ALLOW_SYSCALL(rseq),
+
+    /* Networking (NC vai pedir estas logo em seguida) */
+    ALLOW_SYSCALL(socket),
+    ALLOW_SYSCALL(bind),
+    ALLOW_SYSCALL(listen),
+    ALLOW_SYSCALL(setsockopt),
+    ALLOW_SYSCALL(poll),
+    ALLOW_SYSCALL(ppoll),
+
+    /* Ciclo de vida */
+    ALLOW_SYSCALL(exit_group),
+    ALLOW_SYSCALL(rt_sigreturn),
+
+    ALLOW_SYSCALL(uname),
+    ALLOW_SYSCALL(readlink),
+    ALLOW_SYSCALL(getrandom),
+    ALLOW_SYSCALL(mprotect),
+    ALLOW_SYSCALL(prctl),
+    ALLOW_SYSCALL(getuid),
+    ALLOW_SYSCALL(mmap),
+    ALLOW_SYSCALL(munmap),
+    ALLOW_SYSCALL(fcntl),
+
+    /* After connecting*/
+    ALLOW_SYSCALL(accept),
+    ALLOW_SYSCALL(close),
+    ALLOW_SYSCALL(read),
     KILL_PROCESS
 };
 
@@ -110,5 +140,5 @@ struct sock_filter filter_debug[] = {
 };
 
 unsigned short len_hello = sizeof(filter_hello) / sizeof(filter_hello[0]);
-unsigned short len_init = sizeof(filter_init) / sizeof(filter_init[0]);
+unsigned short len_workload = sizeof(filter_workload) / sizeof(filter_workload[0]);
 unsigned short len_debug = sizeof(filter_debug) / sizeof(filter_debug[0]);

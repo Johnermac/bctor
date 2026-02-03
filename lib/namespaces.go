@@ -17,23 +17,23 @@ const (
 )
 
 type NamespaceConfig struct {
-	UTS   	bool
-	MOUNT 	bool
-	PID   	bool
-	NET   	bool
-	USER 		bool
-	IPC   	bool
-	CGROUP 	bool
+	UTS    bool
+	MOUNT  bool
+	PID    bool
+	NET    bool
+	USER   bool
+	IPC    bool
+	CGROUP bool
 }
 
 func ApplyNamespaces(cfg NamespaceConfig) error {
-	var flags int	
+	var flags int
 
 	if cfg.USER {
 		//flags |= unix.CLONE_NEWUSER
 		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
 			return err
-		}		
+		}
 	}
 
 	if cfg.UTS {
@@ -47,10 +47,10 @@ func ApplyNamespaces(cfg NamespaceConfig) error {
 	}
 	if cfg.NET {
 		flags |= unix.CLONE_NEWNET
-	}	
+	}
 	if cfg.IPC {
 		flags |= unix.CLONE_NEWIPC
-	}	
+	}
 
 	if flags == 0 {
 		return nil
@@ -137,27 +137,27 @@ func (c NamespaceConfig) AnyEnabled() bool {
 	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
 }
 
-func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig){
+func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig) {
 	role, grandchildHostPid, err := ResolvePIDNamespace(cfg.PID)
-		if err != nil {
-			os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
-			unix.Exit(1)
-		}
+	if err != nil {
+		os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
+		unix.Exit(1)
+	}
 
-		switch role {
-		case PIDRoleExit:
-			// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
-			grandchildNS, _ := ReadNamespaces(grandchildHostPid)
-			nsdiff := DiffNamespaces(parentNS, grandchildNS)
-			LogNamespaceDelta(nsdiff)
-			// optional
-			// lib.LogNamespacePosture("grand-child", grandchildNS)
-			//unix.Exit(0)
-		case PIDRoleInit, PIDRoleContinue:
-			path := "/bin/true"
-			err = unix.Exec(path, []string{path}, os.Environ())
-			if err != nil && grandchildHostPid != 0 {
-				os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
-			}
+	switch role {
+	case PIDRoleExit:
+		// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
+		grandchildNS, _ := ReadNamespaces(grandchildHostPid)
+		nsdiff := DiffNamespaces(parentNS, grandchildNS)
+		LogNamespaceDelta(nsdiff)
+		// optional
+		// lib.LogNamespacePosture("grand-child", grandchildNS)
+		//unix.Exit(0)
+	case PIDRoleInit, PIDRoleContinue:
+		path := "/bin/true"
+		err = unix.Exec(path, []string{path}, os.Environ())
+		if err != nil && grandchildHostPid != 0 {
+			os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
 		}
+	}
 }

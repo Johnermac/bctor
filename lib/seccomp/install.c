@@ -15,8 +15,8 @@ int install_hello(void) {
     return install_filter(filter_hello, len_hello);
 }
 
-int install_init(void) {
-    return install_filter(filter_init, len_init);
+int install_workload(void) {
+    return install_filter(filter_workload, len_workload);
 }
 
 int install_debug_shell(void) {

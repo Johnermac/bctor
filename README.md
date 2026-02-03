@@ -78,8 +78,30 @@ CGROUP
 
 in progress
 ```
- | seccomp basically defines what the process is allowed to "say" to the kernel
- | its a BPF bytecode, so we will use C for this one cause I wanna avoid too much abstraction
+ |  seccomp basically defines what the process is allowed to "say" to the kernel
+ |  we define the filters using macros BPF, only whats necessary for each profile.
+ |  we can map the syscalls by running "strace -f <bin>" 
+ |  I wanna do something to map the syscalls in another project
+ | Any syscalls that are not in the filter lists gets KILL_PROCESS
+ |  we load PR_SET_NO_NEW_PRIVS before the filters, this doesnt allow that the processes gain new privileges (sudo). without this we couldnt apply the filter with normal user either
+ |  then send an array of BPF instructions to kernel via syscall seccomp(), and the kernel validates and attaches to the current thread
+ |  once applied the filter cant be removed, our exec already runs with the filters (based on the profile established)
+ |  for each syscall that our exec runs, kernel pauses execution, and check the number of the syscall, if allowed it goes on, if not the process is killed (SIGSYS)
+ └─ our exec now can only run syscall that are allowed to the specified profile
+
+ [!] change SECCOMP_RET_KILL_PROCESS to SECCOMP_RET_LOG and run dmesg to filter the syscalls numbers
+ [!] dmesg -w | grep --line-buffered "syscall=" | sed -u 's/.*syscall=\([0-9]\+\).*/\1/'
+ [!] this will show which syscall is blocking your workload
+ [!] we can get the name with "ausyscall <number>" = "apt install auditd" 
+ 
+ [*] example:
+ [*] [container] nc -lp 4444
+ [*] [host] echo "Hello" | nc -v localhost 4444
+  this can be blocked in many different ways:      
+      -namespaces (by creating net NS)
+      -capabilities (by removing CAPS that allow open ports)
+      -seccomp (by blocking syscalls - if u dont allow read, you can open port, but cant connect)
+      -even with cgroups (by limiting creating of processes)
 
 ```
 
@@ -94,3 +116,4 @@ in progress
 - in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping
 - implement PTY attach to control multiples containers
 - improve folders layout
+- add workloads and more profiles to seccomp

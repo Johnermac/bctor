@@ -10,12 +10,12 @@ import (
 )
 
 type FSConfig struct {
-	Rootfs        string   // path to prepared rootfs
-	ReadOnly  bool
+	Rootfs   string // path to prepared rootfs
+	ReadOnly bool
 	Proc     bool
 	Sys      bool
 	Dev      bool
-	UseTmpfs      bool     // overlay or empty tmpfs /
+	UseTmpfs bool // overlay or empty tmpfs /
 }
 
 type FSPhase int
@@ -32,8 +32,7 @@ type FSMount struct {
 	Flags  uintptr
 }
 
-//func SnapshotMounts() ([]FSMount, error) 
-
+//func SnapshotMounts() ([]FSMount, error)
 
 /*
 func ApplyFilesystem(cfg FSConfig) error
@@ -61,16 +60,16 @@ func writeGIDMap(pidStr string) error {
 	return os.WriteFile("/proc/"+pidStr+"/gid_map", []byte(data), 0644)
 }
 
-func SetupUserNamespace(pidStr string) error {	
-	
+func SetupUserNamespace(pidStr string) error {
+
 	if err := writeUIDMap(pidStr); err != nil {
 		return fmt.Errorf("uid_map: %w", err)
 	}
-	
+
 	if err := denySetgroups(pidStr); err != nil {
 		return fmt.Errorf("setgroups: %w", err)
 	}
-	
+
 	if err := writeGIDMap(pidStr); err != nil {
 		return fmt.Errorf("gid_map: %w", err)
 	}
@@ -98,8 +97,7 @@ func HideProcPaths(paths []string) error {
 	return nil
 }
 
-
-func hideFile(path string) error {	
+func hideFile(path string) error {
 	if err := unix.Mount("/dev/null", path, "", unix.MS_BIND, ""); err != nil {
 		return err
 	}
@@ -131,17 +129,18 @@ func callHideProc() {
 	}
 
 	if err := HideProcPaths(hide); err != nil {
-		return 
+		return
 	}
 }
 
 // little helper
 func copyFile(src, dst string) error {
-    data, err := os.ReadFile(src)
-    if err != nil { return err }
-    return os.WriteFile(dst, data, 0755)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0755)
 }
-
 
 func PrepareRoot(cfg FSConfig) error {
 	// 1. Make mounts private (critical)
@@ -153,7 +152,7 @@ func PrepareRoot(cfg FSConfig) error {
 
 	if err := os.MkdirAll(cfg.Rootfs, 0755); err != nil {
 		return fmt.Errorf("failed to create rootfs dir: %w", err)
-	}	
+	}
 
 	_, err := os.Stat(cfg.Rootfs)
 	if err != nil {
@@ -181,26 +180,27 @@ func PrepareRoot(cfg FSConfig) error {
 		return fmt.Errorf("make rootfs private: %w", err)
 	}
 
-	// 4. setup busybox shell		
-	
+	// 4. setup busybox shell	
+
 	binDir := filepath.Join(cfg.Rootfs, "bin")
-  os.MkdirAll(binDir, 0755)
-    
+	os.MkdirAll(binDir, 0755)
+
 	busyboxDest := filepath.Join(binDir, "busybox")
 	if _, err := os.Stat(busyboxDest); os.IsNotExist(err) {
-			input, _ := os.ReadFile("/bin/busybox")
-			os.WriteFile(busyboxDest, input, 0755)
-			
-			f, _ := os.Open(busyboxDest)
-			f.Sync() 
-			f.Close()
+		input, _ := os.ReadFile("/bin/busybox")
+		os.WriteFile(busyboxDest, input, 0755)
+
+		f, _ := os.Open(busyboxDest)
+		f.Sync()
+		f.Close()
 	}
-	
-	for _, cmd := range []string{"sh", "ls"} {
-			target := filepath.Join(binDir, cmd)
-			os.Remove(target) 
-			os.Symlink("busybox", target)
-	}	
+
+	for _, cmd := range []string{"sh", "ls", "nc"} {
+		target := filepath.Join(binDir, cmd)
+		os.Remove(target)
+		os.Symlink("busybox", target)
+	}
+
 	
 
 	// 5. Prepare /dev and bind host devices
@@ -228,9 +228,6 @@ func PrepareRoot(cfg FSConfig) error {
 	if err := os.MkdirAll(filepath.Join(cfg.Rootfs, ".pivot_old"), 0700); err != nil {
 		return fmt.Errorf("mkdir oldroot: %w", err)
 	}
-
-
-	
 
 	return nil
 }
@@ -294,7 +291,6 @@ func MountVirtualFS(cfg FSConfig) error {
 		}
 	}
 
-	
 	if cfg.UseTmpfs {
 		writable := []string{"/tmp", "/run", "/var"}
 
@@ -315,7 +311,6 @@ func MountVirtualFS(cfg FSConfig) error {
 		}
 	}
 
-	
 	if cfg.ReadOnly {
 		if err := unix.Mount(
 			"",
@@ -328,30 +323,26 @@ func MountVirtualFS(cfg FSConfig) error {
 		}
 	}
 
-
-
 	/*
-	if cfg.Dev {
-		if err := unix.Mount(
-			"tmpfs",
-			"/dev",
-			"tmpfs",
-			unix.MS_NOSUID|unix.MS_STRICTATIME|unix.MS_NOEXEC,
-			"mode=755",
-		); err != nil {
-			return err
-		}		
-	}
-		*/
-
-
+		if cfg.Dev {
+			if err := unix.Mount(
+				"tmpfs",
+				"/dev",
+				"tmpfs",
+				unix.MS_NOSUID|unix.MS_STRICTATIME|unix.MS_NOEXEC,
+				"mode=755",
+			); err != nil {
+				return err
+			}
+		}
+	*/
 
 	return nil
 }
 
-func TestFS() {
+func TestFS(path string) {
 	fsCfg := FSConfig{
-		Rootfs:   "/dev/shm/bctor-root", 
+		Rootfs:   path,
 		ReadOnly: false, // no permission, debug later
 		Proc:     true,
 		Sys:      true,
@@ -365,9 +356,15 @@ func TestFS() {
 		return
 	}
 
-	
 	if pid == 0 {
-		// GRAND-CHILD		
+		// GRAND-CHILD
+
+		/*capStateChild, _ := ReadCaps(os.Getpid())
+		if err != nil {
+			os.Stdout.WriteString("Error in ReadCaps: " + err.Error() + "\n")
+		}
+		LogCapPosture("grand-child", capStateChild)
+		*/
 
 		// 1. Prepare filesystem (mounts, bind, propagation)
 		if err := PrepareRoot(fsCfg); err != nil {
@@ -392,24 +389,12 @@ func TestFS() {
 			unix.Exit(1)
 		}
 
-		// 5. Exec target
-		/*
-		if err := unix.Exec(
-			"/bin/ls",
-			[]string{"ls", "-la", "/"},
-			[]string{"PATH=/bin"},
-		); err != nil {
-			fmt.Fprintln(os.Stderr, "Exec failed:", err)
-			unix.Exit(127)
-		}
-			*/
-		
 		fmt.Println("[*] callHideProc")
 		callHideProc()
-				
-		fmt.Println("[*] ApplySeccomp")
 
-		profile := ProfileHello //set to arg in the future
+		fmt.Println("[*] Apply Seccomp")
+
+		profile := ProfileWorkload //set to arg in the future
 
 		err = ApplySeccomp(profile)
 		if err != nil {
@@ -417,13 +402,23 @@ func TestFS() {
 		}
 		fmt.Println("[*] Profile loaded")
 
-		if profile == ProfileDebugShell { _ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"}) }
-		
+		if profile == ProfileDebugShell {
+			_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
+		}
+
 		if profile == ProfileHello {
 			message := "\n[!] Hello Seccomp!\n"
-			syscall.Write(1, []byte(message))		
+			syscall.Write(1, []byte(message))
 			syscall.Exit(0)
 		}
+
+		if profile == ProfileWorkload {
+			err = unix.Exec("/bin/nc", []string{"nc","-lp","4445"}, os.Environ())
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "nc failed:", err)
+			}
+		}
+
 		
 
 		// unreachable
