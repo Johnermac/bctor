@@ -85,3 +85,12 @@ if err := SetCgroupFreeze(Rootfs, false); err != nil {
 	log.Fatal(err)
 }
 ```
+
+log caps
+```go
+capStateChild, _ := ReadCaps(os.Getpid())
+if err != nil {
+	os.Stdout.WriteString("Error in ReadCaps: " + err.Error() + "\n")
+}
+LogCapPosture("grand-child", capStateChild)
+```

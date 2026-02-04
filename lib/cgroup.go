@@ -226,7 +226,7 @@ func EnableControllers(root string, ctrls []string) error {
 	)
 }
 
-func TestCgroups(cfgNS NamespaceConfig) {
+func SetupCgroups(cfgNS NamespaceConfig) {
 
 	files := []string{
 		"cpu.max",
@@ -238,9 +238,9 @@ func TestCgroups(cfgNS NamespaceConfig) {
 
 	cfg := CGroupsConfig{
 		Path:      "/sys/fs/cgroup/bctor",
-		CPUMax:    "10000 100000", // 10% CPU
-		MemoryMax: "4M",
-		PIDsMax:   "3",
+		CPUMax:    "50000 100000", // 50% CPU
+		MemoryMax: "12M",
+		PIDsMax:   "5",
 	}
 
 	fmt.Println("[*] Init of TestCGroups")

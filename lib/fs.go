@@ -180,7 +180,7 @@ func PrepareRoot(cfg FSConfig) error {
 		return fmt.Errorf("make rootfs private: %w", err)
 	}
 
-	// 4. setup busybox shell	
+	// 4. setup busybox shell
 
 	binDir := filepath.Join(cfg.Rootfs, "bin")
 	os.MkdirAll(binDir, 0755)
@@ -200,8 +200,6 @@ func PrepareRoot(cfg FSConfig) error {
 		os.Remove(target)
 		os.Symlink("busybox", target)
 	}
-
-	
 
 	// 5. Prepare /dev and bind host devices
 	devPath := filepath.Join(cfg.Rootfs, "dev")
@@ -323,110 +321,75 @@ func MountVirtualFS(cfg FSConfig) error {
 		}
 	}
 
-	/*
-		if cfg.Dev {
-			if err := unix.Mount(
-				"tmpfs",
-				"/dev",
-				"tmpfs",
-				unix.MS_NOSUID|unix.MS_STRICTATIME|unix.MS_NOEXEC,
-				"mode=755",
-			); err != nil {
-				return err
-			}
-		}
-	*/
-
 	return nil
 }
 
-func TestFS(path string) {
-	fsCfg := FSConfig{
-		Rootfs:   path,
-		ReadOnly: false, // no permission, debug later
-		Proc:     true,
-		Sys:      true,
-		Dev:      true,
-		UseTmpfs: true,
-	}
-
-	pid, err := NewFork()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "NewFork failed:", err)
-		return
-	}
+func SetupRootAndSpawnWorkload(fsCfg FSConfig, pid uintptr) {
 
 	if pid == 0 {
-		// GRAND-CHILD
-
-		/*capStateChild, _ := ReadCaps(os.Getpid())
-		if err != nil {
-			os.Stdout.WriteString("Error in ReadCaps: " + err.Error() + "\n")
-		}
-		LogCapPosture("grand-child", capStateChild)
-		*/
-
-		// 1. Prepare filesystem (mounts, bind, propagation)
-		if err := PrepareRoot(fsCfg); err != nil {
-			fmt.Fprintln(os.Stderr, "PrepareRoot failed:", err)
-			unix.Exit(1)
-		}
-
-		// 2. pivot_root
-		if err := PivotRoot(fsCfg.Rootfs); err != nil {
-			fmt.Fprintln(os.Stderr, "PivotRoot failed:", err)
-			unix.Exit(1)
-		}
-
-		// 3. Recreate mount points inside new root
-		_ = os.MkdirAll("/proc", 0555)
-		_ = os.MkdirAll("/sys", 0555)
-		_ = os.MkdirAll("/dev", 0755)
-
-		// 4. Mount virtual filesystems
-		if err := MountVirtualFS(fsCfg); err != nil {
-			fmt.Fprintln(os.Stderr, "MountVirtualFS failed:", err)
-			unix.Exit(1)
-		}
-
-		fmt.Println("[*] callHideProc")
-		callHideProc()
-
-		fmt.Println("[*] Apply Seccomp")
-
-		profile := ProfileHello //set to arg in the future
-
-		err = ApplySeccomp(profile)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
-		}
-		fmt.Println("[*] Profile loaded")
-
-		if profile == ProfileDebugShell {
-			_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
-		}
-
-		if profile == ProfileHello {
-			message := "\n[!] Hello Seccomp!\n"
-			syscall.Write(1, []byte(message))
-			syscall.Exit(0)
-		}
-
-		if profile == ProfileWorkload {
-			err = unix.Exec("/bin/nc", []string{"nc","-lp","4445"}, os.Environ())
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "nc failed:", err)
-			}
-		}
-
-		
-
-		// unreachable
-		unix.Exit(0)
+		runWorkload(fsCfg)
 
 	} else {
-		// PARENT
+		// supervisor (parent)
 		var status unix.WaitStatus
 		_, _ = unix.Wait4(int(pid), &status, 0, nil)
 	}
+}
+
+func runWorkload(fsCfg FSConfig) {
+	// 1. Prepare filesystem (mounts, bind, propagation)
+	if err := PrepareRoot(fsCfg); err != nil {
+		fmt.Fprintln(os.Stderr, "PrepareRoot failed:", err)
+		unix.Exit(1)
+	}
+
+	// 2. pivot_root
+	if err := PivotRoot(fsCfg.Rootfs); err != nil {
+		fmt.Fprintln(os.Stderr, "PivotRoot failed:", err)
+		unix.Exit(1)
+	}
+
+	// 3. Recreate mount points inside new root
+	_ = os.MkdirAll("/proc", 0555)
+	_ = os.MkdirAll("/sys", 0555)
+	_ = os.MkdirAll("/dev", 0755)
+
+	// 4. Mount virtual filesystems
+	if err := MountVirtualFS(fsCfg); err != nil {
+		fmt.Fprintln(os.Stderr, "MountVirtualFS failed:", err)
+		unix.Exit(1)
+	}
+
+	fmt.Println("[*] callHideProc")
+	callHideProc()
+
+	fmt.Println("[*] Apply Seccomp")
+
+	profile := ProfileHello //set to arg in the future
+
+	err := ApplySeccomp(profile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
+	}
+	fmt.Println("[*] Profile loaded")
+
+	if profile == ProfileDebugShell {
+		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
+	}
+
+	if profile == ProfileHello {
+		message := "\n[!] Hello Seccomp!\n"
+		syscall.Write(1, []byte(message))
+		syscall.Exit(0)
+	}
+
+	if profile == ProfileWorkload {
+		err = unix.Exec("/bin/nc", []string{"nc", "-lp", "4445"}, os.Environ())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "nc failed:", err)
+		}
+	}
+
+	// unreachable
+	unix.Exit(0)
 }

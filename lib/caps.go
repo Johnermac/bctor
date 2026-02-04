@@ -634,12 +634,12 @@ func ExplainCap(cap Capability) CapEffect {
 	return e
 }
 
-func TestCap() {
+func SetupCapabilities() {
 	cap := CAP_NET_BIND_SERVICE
 	//_ = DropCapability(cap) // DROP
 	DropAllExcept(cap)
 	SetCapabilities(CAP_NET_BIND_SERVICE, CAP_SYS_ADMIN)
 	_ = ClearAmbient()
 	_ = AddInheritable(cap)
-	_ = RaiseAmbient(cap)	
+	_ = RaiseAmbient(cap)
 }

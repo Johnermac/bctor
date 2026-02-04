@@ -137,7 +137,7 @@ func (c NamespaceConfig) AnyEnabled() bool {
 	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
 }
 
-func TestPIDNS(parentNS *NamespaceState, cfg NamespaceConfig) {
+func ValidatePIDNamespace(parentNS *NamespaceState, cfg NamespaceConfig) {
 	role, grandchildHostPid, err := ResolvePIDNamespace(cfg.PID)
 	if err != nil {
 		os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
