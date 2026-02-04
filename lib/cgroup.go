@@ -226,7 +226,7 @@ func EnableControllers(root string, ctrls []string) error {
 	)
 }
 
-func SetupCgroups(cfgNS NamespaceConfig) {
+func SetupCgroups(CGROUP bool, cfg CGroupsConfig) {
 
 	files := []string{
 		"cpu.max",
@@ -236,12 +236,7 @@ func SetupCgroups(cfgNS NamespaceConfig) {
 		"cgroup.procs",
 	}
 
-	cfg := CGroupsConfig{
-		Path:      "/sys/fs/cgroup/bctor",
-		CPUMax:    "50000 100000", // 50% CPU
-		MemoryMax: "12M",
-		PIDsMax:   "5",
-	}
+	
 
 	fmt.Println("[*] Init of TestCGroups")
 
@@ -271,7 +266,7 @@ func SetupCgroups(cfgNS NamespaceConfig) {
 		log.Fatal(err)
 	}
 
-	if cfgNS.CGROUP {
+	if CGROUP {
 		err := unix.Unshare(unix.CLONE_NEWCGROUP)
 		if err != nil {
 			os.Stdout.WriteString("Erro no Unshare CGROUP: " + err.Error() + "\n")

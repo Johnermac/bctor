@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -324,19 +323,7 @@ func MountVirtualFS(cfg FSConfig) error {
 	return nil
 }
 
-func SetupRootAndSpawnWorkload(fsCfg FSConfig, pid uintptr) {
-
-	if pid == 0 {
-		runWorkload(fsCfg)
-
-	} else {
-		// supervisor (parent)
-		var status unix.WaitStatus
-		_, _ = unix.Wait4(int(pid), &status, 0, nil)
-	}
-}
-
-func runWorkload(fsCfg FSConfig) {
+func FileSystemSetup(fsCfg FSConfig) {
 	// 1. Prepare filesystem (mounts, bind, propagation)
 	if err := PrepareRoot(fsCfg); err != nil {
 		fmt.Fprintln(os.Stderr, "PrepareRoot failed:", err)
@@ -362,34 +349,4 @@ func runWorkload(fsCfg FSConfig) {
 
 	fmt.Println("[*] callHideProc")
 	callHideProc()
-
-	fmt.Println("[*] Apply Seccomp")
-
-	profile := ProfileHello //set to arg in the future
-
-	err := ApplySeccomp(profile)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
-	}
-	fmt.Println("[*] Profile loaded")
-
-	if profile == ProfileDebugShell {
-		_ = unix.Exec("/bin/sh", []string{"sh"}, []string{"PATH=/bin"})
-	}
-
-	if profile == ProfileHello {
-		message := "\n[!] Hello Seccomp!\n"
-		syscall.Write(1, []byte(message))
-		syscall.Exit(0)
-	}
-
-	if profile == ProfileWorkload {
-		err = unix.Exec("/bin/nc", []string{"nc", "-lp", "4445"}, os.Environ())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "nc failed:", err)
-		}
-	}
-
-	// unreachable
-	unix.Exit(0)
 }

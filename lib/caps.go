@@ -9,6 +9,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type CapsConfig struct {    
+    AllowCaps []Capability  // whitelist 		
+}
+
+
 type Capability int
 
 const (
@@ -50,6 +55,7 @@ const (
 	CAP_WAKE_ALARM
 	CAP_BLOCK_SUSPEND
 	CAP_AUDIT_READ
+	CAP_ALL = 99
 )
 
 type CapSet uint64
@@ -309,12 +315,16 @@ func DropAllCapabilities() error {
 	return nil
 }
 
-func DropAllExcept(keep Capability) {
-	for c := 0; c <= int(unix.CAP_LAST_CAP); c++ {
-		if Capability(c) == keep {
-			continue
+func DropAllExcept(keep []Capability) {
+	for c := Capability(0); c <= 40; c++ {
+		shouldKeep := false
+		for _, k := range keep {
+			if c == k { shouldKeep = true; break }
+		}		
+		
+		if !shouldKeep {
+			unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0)
 		}
-		_ = unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0)
 	}
 }
 
@@ -421,10 +431,6 @@ func capSet(mutator func(*unix.CapUserHeader, []unix.CapUserData)) error {
 	}
 
 	return nil
-}
-
-func setBit(mask *uint32, cap Capability) {
-	*mask |= 1 << uint(cap)
 }
 
 func EnableAmbient(cap Capability) error {
@@ -561,85 +567,21 @@ func expandCaps(mask uint64) CapSetView {
 	return out
 }
 
-// improve later with llm maybe
+func SetupCapabilities(config CapsConfig) {
+	
+	// perm and effec
+	_ = SetCapabilities(config.AllowCaps...)
 
-func ExplainCap(cap Capability) CapEffect {
-	e := CapEffect{Cap: cap}
+	// inheritable
+  for _, cap := range config.AllowCaps {
+    _ = AddInheritable(cap)
+  }
 
-	switch cap {
+	// bouding
+	DropAllExcept(config.AllowCaps)
 
-	case CAP_SYS_ADMIN:
-		e.Enables = []string{
-			"mount and remount filesystems",
-			"pivot_root and namespace escape primitives",
-			"load/unload filesystem types",
-			"setns into arbitrary namespaces",
-			"bypass many LSM checks (de facto root)",
-		}
-		e.Disables = []string{
-			"filesystem and namespace confinement",
-		}
-
-	case CAP_NET_ADMIN:
-		e.Enables = []string{
-			"create raw sockets",
-			"configure interfaces and routing",
-			"add iptables / nftables rules",
-			"network namespace escape primitives",
-		}
-
-	case CAP_NET_BIND_SERVICE:
-		e.Enables = []string{
-			"bind to privileged ports (<1024)",
-		}
-
-	case CAP_SYS_PTRACE:
-		e.Enables = []string{
-			"attach to arbitrary processes",
-			"read/write process memory",
-			"credential theft via ptrace",
-		}
-		e.Disables = []string{
-			"process isolation",
-		}
-
-	case CAP_SETUID:
-		e.Enables = []string{
-			"change UID arbitrarily",
-			"assume identity of other users",
-		}
-
-	case CAP_SETGID:
-		e.Enables = []string{
-			"change GID arbitrarily",
-			"group-based privilege escalation",
-		}
-
-	case CAP_DAC_OVERRIDE:
-		e.Enables = []string{
-			"bypass file permission checks",
-		}
-
-	case CAP_SYS_CHROOT:
-		e.Enables = []string{
-			"call chroot (not real isolation)",
-		}
-
-	default:
-		e.Enables = []string{
-			"no high-risk primitive documented",
-		}
-	}
-
-	return e
+	for _, cap := range config.AllowCaps {
+        _ = RaiseAmbient(cap)
+    }
 }
 
-func SetupCapabilities() {
-	cap := CAP_NET_BIND_SERVICE
-	//_ = DropCapability(cap) // DROP
-	DropAllExcept(cap)
-	SetCapabilities(CAP_NET_BIND_SERVICE, CAP_SYS_ADMIN)
-	_ = ClearAmbient()
-	_ = AddInheritable(cap)
-	_ = RaiseAmbient(cap)
-}

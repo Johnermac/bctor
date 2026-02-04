@@ -215,8 +215,7 @@ func LogNamespaceDelta(diffs []NamespaceDiff) {
 		fmt.Println("\n[NS] no namespace transitions detected")
 		return
 	}
-
-	fmt.Println("\n[NS] namespace transitions:")
+	
 	for _, d := range diffs {
 		fmt.Printf("  %-4s: %s → %s\n", d.Namespace, d.Before, d.After)
 	}

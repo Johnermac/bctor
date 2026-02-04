@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"runtime"
 	"strconv"
@@ -9,6 +10,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type ContainerSpec struct {
+	ID           string
+	Namespaces   lib.NamespaceConfig
+	FS           lib.FSConfig
+	Capabilities lib.CapsConfig
+	Cgroups      lib.CGroupsConfig // nil = disabled
+	Seccomp      lib.Profile
+	Workload     lib.WorkloadSpec
+}
+
 type SupervisorCtx struct {
 	ParentNS *lib.NamespaceState
 	P2C      [2]int
@@ -16,23 +27,44 @@ type SupervisorCtx struct {
 	ChildPID uintptr
 }
 
+type ContainerState int
+
+const (
+    ContainerCreated ContainerState = iota
+    ContainerRunning
+    ContainerExited
+)
+
+type Container struct {
+    Spec  ContainerSpec
+    PID   int
+    State ContainerState
+}
+
+
 var ctx SupervisorCtx
+var spec ContainerSpec
 
 func main() {
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	ctx := runSupervisor(ctx)
+	ctx := runSupervisor(ctx)	
 
-	if ctx.ChildPID == 0 {
-
-		runContainerInit(ctx)
-
-	} else {
-
-		runSupervisorLoop(ctx)
+	c, err := StartContainer(DefaultShellSpec(), ctx)
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	containers := make(map[string]*Container)
+	containers[c.Spec.ID] = c
+
+	// reap child
+	var status unix.WaitStatus
+	_, _ = unix.Wait4(int(ctx.ChildPID), &status, 0, nil)
+	c.State = ContainerExited
+
 }
 
 func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
@@ -48,90 +80,10 @@ func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
 		panic(err)
 	}
 
-	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())
-
-	ctx.ChildPID, err = lib.NewFork()
-	if err != nil {
-		os.Stdout.WriteString("[?] fork failed: " + err.Error() + "\n")
-		panic(err)
-	}
+	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())	
 
 	return ctx
 
-}
-
-func runContainerInit(ctx SupervisorCtx) {
-	unix.Close(ctx.P2C[1])
-	unix.Close(ctx.C2P[0])
-
-	cfg := lib.NamespaceConfig{
-		USER:  true, //almost everything needs this enabled
-		MOUNT: true,
-		//CGROUP: true, //needs root cause /sys/fs/cgroup
-		//PID: true,
-		//UTS: true,
-		//NET: true,
-		//IPC: true,
-	}
-
-	os.Stdout.WriteString("[*] Apply Namespaces")
-	err := lib.ApplyNamespaces(cfg)
-	if err != nil {
-		os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
-		unix.Exit(1)
-	}
-
-	if cfg.AnyEnabled() {
-		os.Stdout.WriteString("\n[*] Compare Namespaces PARENT-CHILD\n")
-		childNS, _ := lib.ReadNamespaces(os.Getpid())
-		nsdiff := lib.DiffNamespaces(ctx.ParentNS, childNS)
-		lib.LogNamespaceDelta(nsdiff)
-	}
-
-	// PIPE HANDSHAKE
-
-	os.Stdout.WriteString("\n[*] 1 - pipe handshake started with parent\n")
-	unix.Write(ctx.C2P[1], []byte("G"))
-
-	buf := make([]byte, 1)
-	unix.Read(ctx.P2C[0], buf)
-
-	os.Stdout.WriteString("[*] 4 - finished like chads\n")
-
-	// CONTROLS
-
-	if cfg.CGROUP {
-		os.Stdout.WriteString("[*] CGroup\n")
-		lib.SetupCgroups(cfg)
-	}
-
-	if cfg.PID {
-		os.Stdout.WriteString("\n[*] Compare Namespaces PARENT-GRANDCHILD\n")
-		lib.ValidatePIDNamespace(ctx.ParentNS, cfg)
-	}
-
-	os.Stdout.WriteString("[*] Drop Capabilities\n")
-	lib.SetupCapabilities()
-
-	if cfg.MOUNT {
-		os.Stdout.WriteString("[*] File System setup\n")
-		fsCfg := lib.FSConfig{
-			Rootfs:   "/dev/shm/bctor-root/",
-			ReadOnly: false, // no permission, debug later
-			Proc:     true,
-			Sys:      true,
-			Dev:      true,
-			UseTmpfs: true,
-		}
-
-		pid, err := lib.NewFork()
-		if err != nil {
-			os.Stdout.WriteString("Fork failed: " + err.Error() + "\n")
-			return
-		}
-
-		lib.SetupRootAndSpawnWorkload(fsCfg, pid)
-	}
 }
 
 func runSupervisorLoop(ctx SupervisorCtx) {
@@ -157,9 +109,106 @@ func runSupervisorLoop(ctx SupervisorCtx) {
 	// wait for EOF on pipe
 	buf = make([]byte, 1)
 	_, _ = unix.Read(ctx.P2C[0], buf)
-	unix.Close(ctx.P2C[0])
+	unix.Close(ctx.P2C[0])	
+}
 
-	// reap child
-	var status unix.WaitStatus
-	_, _ = unix.Wait4(int(ctx.ChildPID), &status, 0, nil)
+func StartContainer(spec ContainerSpec, ctx SupervisorCtx) (*Container, error) {
+	var err error
+	ctx.ChildPID, err = lib.NewFork()
+	if err != nil {
+		return nil, err
+	}
+
+	if ctx.ChildPID == 0 {
+		runContainerInit(ctx)
+	} else {
+		runSupervisorLoop(ctx)
+	}
+
+	c := &Container{
+		Spec:  spec,
+		PID:   int(ctx.ChildPID),
+		State: ContainerRunning,
+	}
+
+  return c, nil
+}
+
+func DefaultShellSpec() ContainerSpec {
+	spec.Namespaces = lib.NamespaceConfig{
+		USER:  true, //almost everything needs this enabled
+		MOUNT: true,
+		//CGROUP: true, //needs root cause /sys/fs/cgroup
+		//PID: true,
+		//UTS: true,
+		//NET: true,
+		//IPC: true,
+	}
+
+	spec.FS = lib.FSConfig{
+			Rootfs:   "/dev/shm/bctor-root/",
+			ReadOnly: false, // no permission, debug later
+			Proc:     true,
+			Sys:      true,
+			Dev:      true,
+			UseTmpfs: true,
+		}
+
+	spec.Cgroups = lib.CGroupsConfig{
+		Path:      "/sys/fs/cgroup/bctor",
+		CPUMax:    "50000 100000", // 50% CPU
+		MemoryMax: "12M",
+		PIDsMax:   "5",
+	}
+
+	spec.Capabilities = lib.CapsConfig{
+			AllowCaps: []lib.Capability{lib.CAP_NET_BIND_SERVICE},			
+	}
+
+	return spec
+}
+
+func runContainerInit(ctx SupervisorCtx) {
+	unix.Close(ctx.P2C[1])
+	unix.Close(ctx.C2P[0])	
+
+	os.Stdout.WriteString("[*] Apply Namespaces")
+	err := lib.ApplyNamespaces(spec.Namespaces)
+	if err != nil {
+		os.Stdout.WriteString("Error while applying NS: " + err.Error() + "\n")
+		unix.Exit(1)
+	}
+
+	if spec.Namespaces.AnyEnabled() {
+		os.Stdout.WriteString("\n[*] PARENT-CHILD\n")		
+		lib.LogNamespace(ctx.ParentNS, os.Getpid())
+	}
+
+	// PIPE HANDSHAKE
+
+	os.Stdout.WriteString("\n[*] 1 - pipe handshake started with parent\n")
+	unix.Write(ctx.C2P[1], []byte("G"))
+
+	buf := make([]byte, 1)
+	unix.Read(ctx.P2C[0], buf)
+
+	os.Stdout.WriteString("[*] 4 - finished like chads\n")
+
+	// CONTROLS
+
+	if spec.Namespaces.CGROUP {
+		os.Stdout.WriteString("[*] CGroup\n")
+		lib.SetupCgroups(spec.Namespaces.CGROUP, spec.Cgroups)
+	}		
+
+	if spec.Namespaces.MOUNT {		
+
+		pid, err := lib.NewFork()
+		if err != nil {
+			os.Stdout.WriteString("Fork failed: " + err.Error() + "\n")
+			return
+		}
+
+		lib.SetupRootAndSpawnWorkload(spec.FS, pid, spec.Capabilities, ctx.ParentNS)
+	}
 }

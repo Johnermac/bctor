@@ -2,7 +2,6 @@ package lib
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -106,24 +105,7 @@ func flagsChecks(cfg NamespaceConfig) error {
 	return nil
 }
 
-func ResolvePIDNamespace(enabled bool) (PIDRole, int, error) {
-	if !enabled {
-		return PIDRoleContinue, 0, nil
-	}
 
-	pid, err := NewFork()
-	if err != nil {
-		return PIDRoleContinue, 0, nil
-	}
-
-	if pid == 0 {
-		// granchild
-		return PIDRoleInit, 0, nil
-	}
-
-	// child
-	return PIDRoleExit, int(pid), nil
-}
 
 func NewFork() (uintptr, error) {
 	pid, _, err := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
@@ -137,27 +119,9 @@ func (c NamespaceConfig) AnyEnabled() bool {
 	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
 }
 
-func ValidatePIDNamespace(parentNS *NamespaceState, cfg NamespaceConfig) {
-	role, grandchildHostPid, err := ResolvePIDNamespace(cfg.PID)
-	if err != nil {
-		os.Stdout.WriteString("Error in ResolvePIDNamespace: " + err.Error() + "\n")
-		unix.Exit(1)
-	}
-
-	switch role {
-	case PIDRoleExit:
-		// --------------------HERE CHILD IS PRINTING GRAND-CHILD INFO
-		grandchildNS, _ := ReadNamespaces(grandchildHostPid)
-		nsdiff := DiffNamespaces(parentNS, grandchildNS)
-		LogNamespaceDelta(nsdiff)
-		// optional
-		// lib.LogNamespacePosture("grand-child", grandchildNS)
-		//unix.Exit(0)
-	case PIDRoleInit, PIDRoleContinue:
-		path := "/bin/true"
-		err = unix.Exec(path, []string{path}, os.Environ())
-		if err != nil && grandchildHostPid != 0 {
-			os.Stdout.WriteString("Error in unix.Exec PIDRoleInit || PIDRoleContinue: " + err.Error() + "\n")
-		}
-	}
+func LogNamespace(parentNS *NamespaceState, pid int) {		
+	childNS, _ := ReadNamespaces(pid)
+	nsdiff := DiffNamespaces(parentNS, childNS)
+	LogNamespaceDelta(nsdiff)
 }
+
