@@ -394,7 +394,7 @@ func TestFS(path string) {
 
 		fmt.Println("[*] Apply Seccomp")
 
-		profile := ProfileWorkload //set to arg in the future
+		profile := ProfileHello //set to arg in the future
 
 		err = ApplySeccomp(profile)
 		if err != nil {

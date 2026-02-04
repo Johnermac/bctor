@@ -13,131 +13,143 @@
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr))
 
 
-// --- Perfil Minimal    
+// --- Perfil Minimal: For static binaries or very simple tasks ---
 struct sock_filter filter_hello[] = {
     VALIDATE_ARCH,
-    ALLOW_SYSCALL(write),
-    ALLOW_SYSCALL(exit),
-    ALLOW_SYSCALL(exit_group),
-    ALLOW_SYSCALL(rt_sigreturn),
+    ALLOW_SYSCALL(write),        // Write data to stdout/stderr
+    ALLOW_SYSCALL(exit),         // Terminate current thread
+    ALLOW_SYSCALL(exit_group),   // Terminate process and all threads
+    ALLOW_SYSCALL(rt_sigreturn), // Return from signal handler
     KILL_PROCESS
 };
     
-// --- Perfil Workload
+// --- Perfil Workload: Optimized for Netcat (nc) and Go Runtime ---
 struct sock_filter filter_workload[] = {
     VALIDATE_ARCH,
-    /* Runtime Go e Loader */
-    ALLOW_SYSCALL(write),
-    ALLOW_SYSCALL(prlimit64),
-    ALLOW_SYSCALL(execve),
-    ALLOW_SYSCALL(arch_prctl),
-    ALLOW_SYSCALL(brk),
-    ALLOW_SYSCALL(set_tid_address),
-    ALLOW_SYSCALL(set_robust_list),
-    ALLOW_SYSCALL(rseq),
+    /* Initialization & Memory */
+    ALLOW_SYSCALL(execve),       // Execute the binary
+    ALLOW_SYSCALL(brk),          // Extend heap memory
+    ALLOW_SYSCALL(mmap),         // Map memory pages (allocation/libs)
+    ALLOW_SYSCALL(munmap),       // Unmap memory pages
+    ALLOW_SYSCALL(mprotect),     // Change memory protection (NX/RO)
+    ALLOW_SYSCALL(arch_prctl),   // Set architecture-specific thread state (TLS)
+    ALLOW_SYSCALL(prlimit64),    // Get/set process resource limits
 
-    /* Networking (NC vai pedir estas logo em seguida) */
-    ALLOW_SYSCALL(socket),
-    ALLOW_SYSCALL(bind),
-    ALLOW_SYSCALL(listen),
-    ALLOW_SYSCALL(setsockopt),
-    ALLOW_SYSCALL(poll),
-    ALLOW_SYSCALL(ppoll),
+    /* Runtime & Identity */
+    ALLOW_SYSCALL(write),        // Standard output for logs/data
+    ALLOW_SYSCALL(read),         // Read data from input/files
+    ALLOW_SYSCALL(close),        // Close file descriptors
+    ALLOW_SYSCALL(getuid),       // Check current user identity
+    ALLOW_SYSCALL(uname),        // Get system/kernel information
+    ALLOW_SYSCALL(getrandom),    // Get entropy for internal security/salts
+    ALLOW_SYSCALL(prctl),        // Process operations (like setting name)
+    ALLOW_SYSCALL(readlink),     // Resolve symbolic link paths
+    ALLOW_SYSCALL(fcntl),        // File descriptor manipulation
 
-    /* Ciclo de vida */
-    ALLOW_SYSCALL(exit_group),
-    ALLOW_SYSCALL(rt_sigreturn),
+    /* Networking */
+    ALLOW_SYSCALL(socket),       // Create network endpoint
+    ALLOW_SYSCALL(bind),         // Bind socket to a specific port
+    ALLOW_SYSCALL(listen),       // Set socket to listen for connections
+    ALLOW_SYSCALL(accept),       // Accept incoming connections (standard)
+    ALLOW_SYSCALL(accept4),      // Accept incoming connections (with flags)
+    ALLOW_SYSCALL(setsockopt),   // Set socket options (like REUSEADDR)
+    ALLOW_SYSCALL(poll),         // Wait for events on file descriptors
+    ALLOW_SYSCALL(ppoll),        // Modern version of poll with signal mask
 
-    ALLOW_SYSCALL(uname),
-    ALLOW_SYSCALL(readlink),
-    ALLOW_SYSCALL(getrandom),
-    ALLOW_SYSCALL(mprotect),
-    ALLOW_SYSCALL(prctl),
-    ALLOW_SYSCALL(getuid),
-    ALLOW_SYSCALL(mmap),
-    ALLOW_SYSCALL(munmap),
-    ALLOW_SYSCALL(fcntl),
-
-    /* After connecting*/
-    ALLOW_SYSCALL(accept),
-    ALLOW_SYSCALL(close),
-    ALLOW_SYSCALL(read),
+    /* Signals & Lifecycle */
+    ALLOW_SYSCALL(set_tid_address), // Thread-local storage setup
+    ALLOW_SYSCALL(set_robust_list), // Manage robust futexes for crashes
+    ALLOW_SYSCALL(rseq),            // Restartable sequences for speed
+    ALLOW_SYSCALL(rt_sigreturn),    // Essential for signal handling
+    ALLOW_SYSCALL(exit_group),      // Clean exit for all threads
     KILL_PROCESS
 };
 
+// --- Perfil Debug: Wide allowlist for full shell/busybox capability ---
 struct sock_filter filter_debug[] = {    
     VALIDATE_ARCH,
-    ALLOW_SYSCALL(execve),
-    ALLOW_SYSCALL(brk),
-    ALLOW_SYSCALL(mmap),
-    ALLOW_SYSCALL(munmap),    // Liberar memória
-    ALLOW_SYSCALL(mprotect),  // Proteção de memória (necessário para carregar bibliotecas)
-    ALLOW_SYSCALL(access),
-    ALLOW_SYSCALL(fstat),
-    ALLOW_SYSCALL(newfstatat),// Versão moderna do fstat (muito comum em distros novas)
-    ALLOW_SYSCALL(arch_prctl),
-    ALLOW_SYSCALL(openat),    // Abrir arquivos (libc, libs)
-    ALLOW_SYSCALL(close),     // Fechar arquivos
-    ALLOW_SYSCALL(read),
-    ALLOW_SYSCALL(write),
-    ALLOW_SYSCALL(pread64),   // Leitura em offsets (carregamento de ELF)
-    ALLOW_SYSCALL(set_tid_address), // Init de threads da libc    
-    ALLOW_SYSCALL(rt_sigaction), // Sinais (Ctrl+C, etc)
-    ALLOW_SYSCALL(getuid),    // Shell precisa saber quem é você
-    ALLOW_SYSCALL(getgid),
-    ALLOW_SYSCALL(getpid),    
-    ALLOW_SYSCALL(fcntl),
-    ALLOW_SYSCALL(prlimit64),  // A que causou o crash no strace
-    ALLOW_SYSCALL(setgid),     // Comum em setups de privilégios
-    ALLOW_SYSCALL(setuid),     // Comum em setups de privilégios
-    ALLOW_SYSCALL(setgroups),  // Comum em setups de privilégios    
-    ALLOW_SYSCALL(set_robust_list), // A que causou o crash (SYS_set_robust_list)
-    ALLOW_SYSCALL(capget),         // Shells checam capacidades (SYS_capget)
-    ALLOW_SYSCALL(capset),
-    ALLOW_SYSCALL(set_robust_list),
-    ALLOW_SYSCALL(rseq),           // A que causou o crash (SYS_rseq)
-    ALLOW_SYSCALL(uname),          // A que causou o crash agora
-    ALLOW_SYSCALL(stat),           // Checar arquivos
-    ALLOW_SYSCALL(lstat),          // Checar links simbólicos
-    ALLOW_SYSCALL(readlink),       // Ler caminhos de links
-    ALLOW_SYSCALL(pipe),           // Shell usa pipes para comandos
-    ALLOW_SYSCALL(pipe2),          // Versão moderna do pipe
-    ALLOW_SYSCALL(wait4),          // Shell precisa esperar os comandos terminarem
-    ALLOW_SYSCALL(getrandom),      // A que causou o crash (SYS_getrandom)
-    ALLOW_SYSCALL(poll),           // Esperar por eventos de E/S
-    ALLOW_SYSCALL(select),         // Alternativa ao poll
-    ALLOW_SYSCALL(rt_sigprocmask), // Gerenciar bloqueio de sinais
-    ALLOW_SYSCALL(sigaltstack),    // Stack de sinais para handlers
-    ALLOW_SYSCALL(prctl),          // A que causou o crash (PR_SET_NAME)    
-    ALLOW_SYSCALL(getpgrp),        // Shell precisa saber o grupo do processo
-    ALLOW_SYSCALL(getppid),        // Saber quem é o pai
-    ALLOW_SYSCALL(getcwd),         // Para mostrar o caminho no prompt (pwd)
-    ALLOW_SYSCALL(setpgid),        // A que causou o crash (SYS_setpgid)    
-    ALLOW_SYSCALL(rt_sigreturn),   // Retorno de sinal    
-    ALLOW_SYSCALL(geteuid),        // A que causou o crash (SYS_geteuid)
-    ALLOW_SYSCALL(getegid),        // Quase sempre chamada junto com geteuid
-    ALLOW_SYSCALL(getresuid),      // Verificação detalhada de identidade
-    ALLOW_SYSCALL(getresgid),
-    ALLOW_SYSCALL(ioctl),          // Essencial: o log mostrou várias chamadas de controle de terminal (TCSETS, etc)
-    ALLOW_SYSCALL(clone),          // A que causou o crash (essencial para rodar comandos)
-    ALLOW_SYSCALL(getgroups),
-    ALLOW_SYSCALL(getdents64),   // OBRIGATÓRIA para o ls listar arquivos
-    ALLOW_SYSCALL(chdir),        // A syscall que o 'cd' usa de fato
-    ALLOW_SYSCALL(dup),
-    ALLOW_SYSCALL(dup2),
-    ALLOW_SYSCALL(dup3),   
-    /* Gerenciamento de Processos e Finalização */
-    ALLOW_SYSCALL(exit_group),     // OBRIGATÓRIO para processos filhos terminarem 
-    /* Navegação e Sistema de Arquivos */
-    ALLOW_SYSCALL(lseek),          // ps e id usam para ler arquivos de sistema/config
-    ALLOW_SYSCALL(readlinkat),     // Algumas versões de ls/ps precisam
-    ALLOW_SYSCALL(getdents),       // Algumas glibc antigas usam a versão 32-bit (SYS_getdents)
-    ALLOW_SYSCALL(socket),         // id usa para nscd (Name Service Cache Daemon)
-    ALLOW_SYSCALL(connect),        // id usa para nscd
-    ALLOW_SYSCALL(futex),
-    // … find with strace -f ./bctor
-    KILL_PROCESS,
+    /* File System & Navigation */
+    ALLOW_SYSCALL(openat),       // Open files relative to directory
+    ALLOW_SYSCALL(read),         // Read from files
+    ALLOW_SYSCALL(write),        // Write to files
+    ALLOW_SYSCALL(close),        // Close descriptors
+    ALLOW_SYSCALL(access),       // Check file permissions
+    ALLOW_SYSCALL(stat),         // Get file status
+    ALLOW_SYSCALL(fstat),        // Get file status via descriptor
+    ALLOW_SYSCALL(lstat),        // Get symlink status
+    ALLOW_SYSCALL(newfstatat),   // Modern fstat variant
+    ALLOW_SYSCALL(getdents),     // List directory entries (legacy)
+    ALLOW_SYSCALL(getdents64),   // List directory entries (modern/ls)
+    ALLOW_SYSCALL(readlink),     // Read symlink target
+    ALLOW_SYSCALL(readlinkat),   // Read symlink target relative
+    ALLOW_SYSCALL(lseek),        // Move file pointer (ps/config)
+    ALLOW_SYSCALL(getcwd),       // Get current working directory (pwd)
+    ALLOW_SYSCALL(chdir),        // Change directory (cd)
+    ALLOW_SYSCALL(pipe),         // Create inter-process pipe
+    ALLOW_SYSCALL(pipe2),        // Create pipe with flags
+
+    /* Process Management */
+    ALLOW_SYSCALL(execve),       // Execute new programs
+    ALLOW_SYSCALL(clone),        // Create child processes (fork)
+    ALLOW_SYSCALL(wait4),        // Wait for process termination
+    ALLOW_SYSCALL(exit_group),   // Terminate process group
+    ALLOW_SYSCALL(getpid),       // Get process ID
+    ALLOW_SYSCALL(getppid),      // Get parent process ID
+    ALLOW_SYSCALL(getpgrp),      // Get process group ID
+    ALLOW_SYSCALL(setpgid),      // Set process group ID (job control)
+
+    /* Memory & System */
+    ALLOW_SYSCALL(brk),          // Heap management
+    ALLOW_SYSCALL(mmap),         // Memory mapping
+    ALLOW_SYSCALL(munmap),       // Memory unmapping
+    ALLOW_SYSCALL(mprotect),     // Set memory protection
+    ALLOW_SYSCALL(pread64),      // Read from offset (binary loading)
+    ALLOW_SYSCALL(arch_prctl),   // Arch-specific process control
+    ALLOW_SYSCALL(prlimit64),    // Manage resource limits
+    ALLOW_SYSCALL(uname),        // Get system info
+    ALLOW_SYSCALL(getrandom),    // Entropy
+    ALLOW_SYSCALL(prctl),        // Process-wide control (name/seccomp)
+    ALLOW_SYSCALL(futex),        // Fast userspace locking (mutexes)
+
+    /* Identity & Caps */
+    ALLOW_SYSCALL(getuid),       // Get real user ID
+    ALLOW_SYSCALL(geteuid),      // Get effective user ID
+    ALLOW_SYSCALL(getgid),       // Get real group ID
+    ALLOW_SYSCALL(getegid),      // Get effective group ID
+    ALLOW_SYSCALL(getresuid),    // Get real, effective, saved UIDs
+    ALLOW_SYSCALL(getresgid),    // Get real, effective, saved GIDs
+    ALLOW_SYSCALL(getgroups),    // Get supplementary groups
+    ALLOW_SYSCALL(setuid),       // Set user identity
+    ALLOW_SYSCALL(setgid),       // Set group identity
+    ALLOW_SYSCALL(setgroups),    // Set supplementary groups
+    ALLOW_SYSCALL(capget),       // Get process capabilities
+    ALLOW_SYSCALL(capset),       // Set process capabilities
+
+    /* Signals & IO */
+    ALLOW_SYSCALL(rt_sigaction), // Set signal handler
+    ALLOW_SYSCALL(rt_sigprocmask), // Block/unblock signals
+    ALLOW_SYSCALL(rt_sigreturn), // Signal handler return
+    ALLOW_SYSCALL(sigaltstack),  // Define alternate signal stack
+    ALLOW_SYSCALL(poll),         // Wait for file events
+    ALLOW_SYSCALL(select),       // Wait for file events (old)
+    ALLOW_SYSCALL(ioctl),        // Terminal & Device control
+    ALLOW_SYSCALL(fcntl),        // File descriptor control
+    ALLOW_SYSCALL(dup),          // Duplicate file descriptor
+    ALLOW_SYSCALL(dup2),         // Duplicate to specific fd
+    ALLOW_SYSCALL(dup3),         // Duplicate with flags
+
+    /* Networking (Support for ID/Network utilities) */
+    ALLOW_SYSCALL(socket),       // Network endpoint creation
+    ALLOW_SYSCALL(connect),      // Initiate network connection
+    
+    /* Glibc Helpers */
+    ALLOW_SYSCALL(set_tid_address), // Thread-ID pointer
+    ALLOW_SYSCALL(set_robust_list), // Robust futex list
+    ALLOW_SYSCALL(rseq),            // Restartable sequences
+
+    KILL_PROCESS
 };
+
 
 unsigned short len_hello = sizeof(filter_hello) / sizeof(filter_hello[0]);
 unsigned short len_workload = sizeof(filter_workload) / sizeof(filter_workload[0]);
