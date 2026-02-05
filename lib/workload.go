@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"syscall"
@@ -31,7 +32,8 @@ func SetupRootAndSpawnWorkload(
 	fsCfg FSConfig, 
 	pid uintptr, 
 	cfg CapsConfig, 
-	p *NamespaceState) {
+	p *NamespaceState,
+	init2sup [2]int) {
 
 	if pid == 0 {	
 
@@ -45,9 +47,12 @@ func SetupRootAndSpawnWorkload(
 		runWorkload()
 
 	} else {
-		
-		os.Stdout.WriteString("\n[*] PARENT-GRANDCHILD\n")
-		LogNamespace(p, int(pid))
+		//container-init
+		//os.Stdout.WriteString("\n[*] PARENT-GRANDCHILD\n")
+		//LogNamespace(p, int(pid))
+		buf := make([]byte, 8)
+    binary.LittleEndian.PutUint64(buf, uint64(pid))
+    unix.Write(init2sup[1], buf)
 		
 		// supervisor (parent)
 		var status unix.WaitStatus

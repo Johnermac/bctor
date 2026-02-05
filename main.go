@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
+	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 
@@ -24,6 +27,7 @@ type SupervisorCtx struct {
 	ParentNS *lib.NamespaceState
 	P2C      [2]int
 	C2P      [2]int
+	Init2sup [2]int
 	ChildPID uintptr
 }
 
@@ -32,25 +36,34 @@ type ContainerState int
 const (
     ContainerCreated ContainerState = iota
     ContainerRunning
+		ContainerStopped
     ContainerExited
 )
 
 type Container struct {
-    Spec  ContainerSpec
-    PID   int
-    State ContainerState
+    Spec  			*ContainerSpec
+    InitPID   	int
+		WorkloadPID int
+    State 		  ContainerState
 }
+
+
+
+
 
 
 var ctx SupervisorCtx
 var spec ContainerSpec
+
 
 func main() {
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	ctx := runSupervisor(ctx)	
+	ctx := runSupervisor(ctx)
+
+	sigCh := signalHandling()
 
 	c, err := StartContainer(DefaultShellSpec(), ctx)
 	if err != nil {
@@ -60,11 +73,13 @@ func main() {
 	containers := make(map[string]*Container)
 	containers[c.Spec.ID] = c
 
-	// reap child
-	var status unix.WaitStatus
-	_, _ = unix.Wait4(int(ctx.ChildPID), &status, 0, nil)
-	c.State = ContainerExited
+	fmt.Printf("[!] initPID: %d\n", c.InitPID)
+	fmt.Printf("[!] WorkloadPID: %d\n", c.WorkloadPID)
+			
 
+	startSignalForwarder(containers, sigCh)
+	reapChildren(containers)		
+	
 }
 
 func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
@@ -79,6 +94,11 @@ func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
 	if err != nil {
 		panic(err)
 	}
+
+	err = unix.Pipe2(ctx.Init2sup[:], unix.O_CLOEXEC)
+	if err != nil {
+		panic(err)
+	}	
 
 	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())	
 
@@ -117,7 +137,15 @@ func StartContainer(spec ContainerSpec, ctx SupervisorCtx) (*Container, error) {
 	ctx.ChildPID, err = lib.NewFork()
 	if err != nil {
 		return nil, err
+	}	
+
+	containers := map[string]*Container{}
+	containers[spec.ID] = &Container{
+		Spec:  &spec,
+		InitPID:   int(ctx.ChildPID),
+		State: ContainerCreated,
 	}
+
 
 	if ctx.ChildPID == 0 {
 		runContainerInit(ctx)
@@ -125,9 +153,14 @@ func StartContainer(spec ContainerSpec, ctx SupervisorCtx) (*Container, error) {
 		runSupervisorLoop(ctx)
 	}
 
+	buf := make([]byte, 8)
+	unix.Read(ctx.Init2sup[0], buf)
+	workloadPID := int(binary.LittleEndian.Uint64(buf))
+
 	c := &Container{
-		Spec:  spec,
-		PID:   int(ctx.ChildPID),
+		Spec:  &spec,
+		InitPID:   int(ctx.ChildPID),
+		WorkloadPID: workloadPID,
 		State: ContainerRunning,
 	}
 
@@ -194,6 +227,8 @@ func runContainerInit(ctx SupervisorCtx) {
 
 	os.Stdout.WriteString("[*] 4 - finished like chads\n")
 
+	
+
 	// CONTROLS
 
 	if spec.Namespaces.CGROUP {
@@ -209,6 +244,79 @@ func runContainerInit(ctx SupervisorCtx) {
 			return
 		}
 
-		lib.SetupRootAndSpawnWorkload(spec.FS, pid, spec.Capabilities, ctx.ParentNS)
+		lib.SetupRootAndSpawnWorkload(
+			spec.FS, 
+			pid, 
+			spec.Capabilities, 
+			ctx.ParentNS, 
+			ctx.Init2sup)
 	}
+}
+
+func waitForAnyChild() (int, unix.WaitStatus, error) {
+    var status unix.WaitStatus
+    pid, err := unix.Wait4(-1, &status, 0, nil)
+    if err != nil {
+        return -1, status, err
+    }
+    return pid, status, nil
+}
+
+func findContainerByPID(containers map[string]*Container, pid int) *Container {
+    for _, c := range containers {
+        if c.WorkloadPID == pid || c.InitPID == pid {
+            return c
+        }
+    }
+    return nil
+}
+
+func signalHandling() chan os.Signal {
+	sigCh := make(chan os.Signal, 16)
+	signal.Notify(
+    sigCh,
+    unix.SIGINT,
+    unix.SIGTERM,
+    unix.SIGQUIT,
+    unix.SIGHUP,
+	)
+	return sigCh
+}
+
+func reapChildren(containers map[string]*Container) {
+	for len(containers) > 0 {
+    pid, _, err := waitForAnyChild()
+    if err != nil {
+        if err == unix.EINTR {
+            continue
+        }
+        break
+    }
+
+    c := findContainerByPID(containers, pid)
+    if c == nil {
+			// orphan or unknown child; still must reap
+			continue
+    }		
+
+		if pid == c.WorkloadPID {
+			c.State = ContainerExited
+			delete(containers, c.Spec.ID)
+    }
+	}
+}
+
+func startSignalForwarder(
+    containers map[string]*Container,
+    sigCh chan os.Signal,
+) {
+    go func() {
+        for sig := range sigCh {
+            for _, c := range containers {
+                if c.WorkloadPID > 0 {
+                    _ = unix.Kill(c.WorkloadPID, sig.(unix.Signal))
+                }
+            }
+        }
+    }()
 }
