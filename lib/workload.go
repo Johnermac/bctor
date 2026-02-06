@@ -52,28 +52,12 @@ func SetupRootAndSpawnWorkload(
 		unix.Exit(127)
 
 	} else {
-		workloadPID := int(pid)
-		fmt.Printf("[*] container-init > Send workload PID: %d\n", workloadPID)
-
+		fmt.Printf(
+			"[DBG] container-init: PID=%d waiting for child PID=%d\n",
+			os.Getpid(), pid,
+		)
 		// notify supervisor of workload PID
-		buf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buf, uint64(workloadPID))
-		_, _ = unix.Write(init2sup[1], buf)
-		unix.Close(init2sup[1])
-
-		fmt.Printf("[*] var status unix.WaitStatus\n")
-		var status unix.WaitStatus
-		_, _ = unix.Wait4(int(pid), &status, 0, nil)
-
-		if status.Exited() {
-			os.Exit(status.ExitStatus())
-		}
-		if status.Signaled() {
-			os.Exit(128 + int(status.Signal()))
-		}
-
-		os.Exit(0)
-
+		subReaper(int(pid), init2sup)
 	}
 }
 
@@ -106,4 +90,38 @@ func runWorkload() {
 
 	// unreachable
 	unix.Exit(0)
+}
+
+func subReaper(workloadPID int, init2sup [2]int) {
+	fmt.Printf("[*] container-init > Send workload PID: %d\n", workloadPID)
+
+	// notify supervisor of workload PID
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(workloadPID))
+	_, _ = unix.Write(init2sup[1], buf)
+	unix.Close(init2sup[1])
+
+	var status unix.WaitStatus
+	wpid, err := unix.Wait4(workloadPID, &status, 0, nil)
+
+	fmt.Printf(
+		"[DBG] container-init wait returned: wpid=%d exited=%v signaled=%v status=%v err=%v\n",
+		wpid,
+		status.Exited(),
+		status.Signaled(),
+		status,
+		err,
+	)
+
+	if status.Exited() {
+		fmt.Printf("[DBG] container-init exiting with %d\n", status.ExitStatus())
+		os.Exit(status.ExitStatus())
+	}
+	if status.Signaled() {
+		fmt.Printf("[DBG] container-init exiting via signal %d\n", status.Signal())
+		os.Exit(128 + int(status.Signal()))
+	}
+
+	fmt.Println("[DBG] container-init exiting cleanly")
+	os.Exit(0)
 }

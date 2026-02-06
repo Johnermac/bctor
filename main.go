@@ -117,14 +117,29 @@ func supervisorLoop(containers map[string]*Container, events <-chan Event) {
 			}
 
 		case EventChildExit:
+			fmt.Printf("[DBG] supervisor got exit: PID=%d\n", ev.PID)
+
 			c := findContainerByPID(containers, ev.PID)
 			if c == nil {
+				fmt.Println("[DBG] supervisor: unknown PID")
 				continue
 			}
 
+			fmt.Printf(
+				"[DBG] container match: InitPID=%d WorkloadPID=%d\n",
+				c.InitPID, c.WorkloadPID,
+			)
+
 			if ev.PID == c.InitPID {
+				fmt.Println("[DBG] container fully exited")
 				c.State = ContainerExited
 				delete(containers, c.Spec.ID)
+			} else if ev.PID == c.WorkloadPID {
+				fmt.Println("[DBG] container workload exited, killing init")
+				c.State = ContainerStopped
+				if c.InitPID > 0 {
+					_ = unix.Kill(c.InitPID, unix.SIGKILL)
+				}
 			}
 		}
 	}
@@ -327,6 +342,13 @@ func startReaper(events chan<- Event) {
 				fmt.Printf("[!] reaper fatal error: %v\n", err)
 				continue
 			}
+
+			fmt.Printf(
+				"[DBG] reaper: pid=%d exited=%v signaled=%v\n",
+				pid,
+				status.Exited(),
+				status.Signaled(),
+			)
 
 			events <- Event{
 				Type:   EventChildExit,
