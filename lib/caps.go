@@ -9,10 +9,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type CapsConfig struct {    
-    AllowCaps []Capability  // whitelist 		
+type CapsConfig struct {
+	AllowCaps []Capability // whitelist
 }
-
 
 type Capability int
 
@@ -319,9 +318,12 @@ func DropAllExcept(keep []Capability) {
 	for c := Capability(0); c <= 40; c++ {
 		shouldKeep := false
 		for _, k := range keep {
-			if c == k { shouldKeep = true; break }
-		}		
-		
+			if c == k {
+				shouldKeep = true
+				break
+			}
+		}
+
 		if !shouldKeep {
 			unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(c), 0, 0, 0)
 		}
@@ -568,20 +570,19 @@ func expandCaps(mask uint64) CapSetView {
 }
 
 func SetupCapabilities(config CapsConfig) {
-	
+
 	// perm and effec
 	_ = SetCapabilities(config.AllowCaps...)
 
 	// inheritable
-  for _, cap := range config.AllowCaps {
-    _ = AddInheritable(cap)
-  }
+	for _, cap := range config.AllowCaps {
+		_ = AddInheritable(cap)
+	}
 
 	// bouding
 	DropAllExcept(config.AllowCaps)
 
 	for _, cap := range config.AllowCaps {
-        _ = RaiseAmbient(cap)
-    }
+		_ = RaiseAmbient(cap)
+	}
 }
-

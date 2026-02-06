@@ -105,8 +105,6 @@ func flagsChecks(cfg NamespaceConfig) error {
 	return nil
 }
 
-
-
 func NewFork() (uintptr, error) {
 	pid, _, err := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
 	if err != 0 {
@@ -119,9 +117,8 @@ func (c NamespaceConfig) AnyEnabled() bool {
 	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
 }
 
-func LogNamespace(parentNS *NamespaceState, pid int) {		
+func LogNamespace(parentNS *NamespaceState, pid int) {
 	childNS, _ := ReadNamespaces(pid)
 	nsdiff := DiffNamespaces(parentNS, childNS)
 	LogNamespaceDelta(nsdiff)
 }
-

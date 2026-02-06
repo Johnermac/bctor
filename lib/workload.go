@@ -29,38 +29,55 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 }
 
 func SetupRootAndSpawnWorkload(
-	fsCfg FSConfig, 
-	pid uintptr, 
-	cfg CapsConfig, 
+	fsCfg FSConfig,
+	pid uintptr,
+	cfg CapsConfig,
 	p *NamespaceState,
 	init2sup [2]int) {
 
-	if pid == 0 {	
+	if pid == 0 {
+		unix.Close(init2sup[0])
 
 		fmt.Println("[*] File System Setup")
 		FileSystemSetup(fsCfg)
 
 		os.Stdout.WriteString("[*] Applying Capabilities isolation\n")
-		SetupCapabilities(cfg)	
+		SetupCapabilities(cfg)
 
 		fmt.Println("[*] Run Workload")
 		runWorkload()
 
+		// If we get here, exec failed
+		fmt.Fprintln(os.Stderr, "[?] workload returned unexpectedly")
+		unix.Exit(127)
+
 	} else {
-		//container-init
-		//os.Stdout.WriteString("\n[*] PARENT-GRANDCHILD\n")
-		//LogNamespace(p, int(pid))
+		workloadPID := int(pid)
+		fmt.Printf("[*] container-init > Send workload PID: %d\n", workloadPID)
+
+		// notify supervisor of workload PID
 		buf := make([]byte, 8)
-    binary.LittleEndian.PutUint64(buf, uint64(pid))
-    unix.Write(init2sup[1], buf)
-		
-		// supervisor (parent)
+		binary.LittleEndian.PutUint64(buf, uint64(workloadPID))
+		_, _ = unix.Write(init2sup[1], buf)
+		unix.Close(init2sup[1])
+
+		fmt.Printf("[*] var status unix.WaitStatus\n")
 		var status unix.WaitStatus
 		_, _ = unix.Wait4(int(pid), &status, 0, nil)
+
+		if status.Exited() {
+			os.Exit(status.ExitStatus())
+		}
+		if status.Signaled() {
+			os.Exit(128 + int(status.Signal()))
+		}
+
+		os.Exit(0)
+
 	}
 }
 
-func runWorkload() {		
+func runWorkload() {
 
 	profile := ProfileHello //set to arg in the future
 	fmt.Println("[*] Apply Seccomp Profile:", profile)

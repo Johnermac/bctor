@@ -34,27 +34,35 @@ type SupervisorCtx struct {
 type ContainerState int
 
 const (
-    ContainerCreated ContainerState = iota
-    ContainerRunning
-		ContainerStopped
-    ContainerExited
+	ContainerCreated ContainerState = iota
+	ContainerRunning
+	ContainerStopped
+	ContainerExited
 )
 
 type Container struct {
-    Spec  			*ContainerSpec
-    InitPID   	int
-		WorkloadPID int
-    State 		  ContainerState
+	Spec        *ContainerSpec
+	InitPID     int
+	WorkloadPID int
+	State       ContainerState
 }
 
+type EventType int
 
+const (
+	EventChildExit EventType = iota
+	EventSignal
+)
 
-
-
+type Event struct {
+	Type   EventType
+	PID    int
+	Status unix.WaitStatus
+	Signal unix.Signal
+}
 
 var ctx SupervisorCtx
 var spec ContainerSpec
-
 
 func main() {
 
@@ -63,23 +71,63 @@ func main() {
 
 	ctx := runSupervisor(ctx)
 
-	sigCh := signalHandling()
+	containers := make(map[string]*Container)
+	events := make(chan Event, 32)
+	fmt.Printf("[*] Starting Reaper and Signal Handler\n")
+	startReaper(events)
+	startSignalHandler(events)
 
-	c, err := StartContainer(DefaultShellSpec(), ctx)
+	fmt.Printf("[*] Starting Container with default spec\n")
+
+	c, err := StartContainer(DefaultShellSpec(), ctx, containers)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	containers := make(map[string]*Container)
 	containers[c.Spec.ID] = c
+	fmt.Printf("[*] container added to map: %s\n", c.Spec.ID)
 
 	fmt.Printf("[!] initPID: %d\n", c.InitPID)
 	fmt.Printf("[!] WorkloadPID: %d\n", c.WorkloadPID)
-			
 
-	startSignalForwarder(containers, sigCh)
-	reapChildren(containers)		
-	
+	fmt.Printf("[*] Supervisor loop started\n")
+	supervisorLoop(containers, events)
+
+}
+
+func supervisorLoop(containers map[string]*Container, events <-chan Event) {
+	fmt.Printf("[*] len: %d\n", len(containers))
+	for len(containers) > 0 {
+		ev, ok := <-events
+		if !ok {
+			fmt.Printf("[*] Events channel closed\n")
+			return
+		}
+
+		fmt.Printf("[*] event type: %d\n", ev.Type)
+		fmt.Printf("[*] InitPID: %d\n", ev.PID)
+		switch ev.Type {
+
+		case EventSignal:
+			for _, c := range containers {
+				fmt.Printf("[*] InitPID to signal: %d\n", c.InitPID)
+				if c.InitPID > 0 {
+					_ = unix.Kill(c.InitPID, ev.Signal)
+				}
+			}
+
+		case EventChildExit:
+			c := findContainerByPID(containers, ev.PID)
+			if c == nil {
+				continue
+			}
+
+			if ev.PID == c.InitPID {
+				c.State = ContainerExited
+				delete(containers, c.Spec.ID)
+			}
+		}
+	}
 }
 
 func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
@@ -98,9 +146,9 @@ func runSupervisor(ctx SupervisorCtx) SupervisorCtx {
 	err = unix.Pipe2(ctx.Init2sup[:], unix.O_CLOEXEC)
 	if err != nil {
 		panic(err)
-	}	
+	}
 
-	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())	
+	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())
 
 	return ctx
 
@@ -129,23 +177,22 @@ func runSupervisorLoop(ctx SupervisorCtx) {
 	// wait for EOF on pipe
 	buf = make([]byte, 1)
 	_, _ = unix.Read(ctx.P2C[0], buf)
-	unix.Close(ctx.P2C[0])	
+	unix.Close(ctx.P2C[0])
 }
 
-func StartContainer(spec ContainerSpec, ctx SupervisorCtx) (*Container, error) {
+func StartContainer(spec ContainerSpec, ctx SupervisorCtx, containers map[string]*Container) (*Container, error) {
 	var err error
 	ctx.ChildPID, err = lib.NewFork()
 	if err != nil {
 		return nil, err
-	}	
-
-	containers := map[string]*Container{}
-	containers[spec.ID] = &Container{
-		Spec:  &spec,
-		InitPID:   int(ctx.ChildPID),
-		State: ContainerCreated,
 	}
 
+	//containers := map[string]*Container{}
+	containers[spec.ID] = &Container{
+		Spec:    &spec,
+		InitPID: int(ctx.ChildPID),
+		State:   ContainerCreated,
+	}
 
 	if ctx.ChildPID == 0 {
 		runContainerInit(ctx)
@@ -158,13 +205,13 @@ func StartContainer(spec ContainerSpec, ctx SupervisorCtx) (*Container, error) {
 	workloadPID := int(binary.LittleEndian.Uint64(buf))
 
 	c := &Container{
-		Spec:  &spec,
-		InitPID:   int(ctx.ChildPID),
+		Spec:        &spec,
+		InitPID:     int(ctx.ChildPID),
 		WorkloadPID: workloadPID,
-		State: ContainerRunning,
+		State:       ContainerRunning,
 	}
 
-  return c, nil
+	return c, nil
 }
 
 func DefaultShellSpec() ContainerSpec {
@@ -179,13 +226,13 @@ func DefaultShellSpec() ContainerSpec {
 	}
 
 	spec.FS = lib.FSConfig{
-			Rootfs:   "/dev/shm/bctor-root/",
-			ReadOnly: false, // no permission, debug later
-			Proc:     true,
-			Sys:      true,
-			Dev:      true,
-			UseTmpfs: true,
-		}
+		Rootfs:   "/dev/shm/bctor-root/",
+		ReadOnly: false, // no permission, debug later
+		Proc:     true,
+		Sys:      true,
+		Dev:      true,
+		UseTmpfs: true,
+	}
 
 	spec.Cgroups = lib.CGroupsConfig{
 		Path:      "/sys/fs/cgroup/bctor",
@@ -195,7 +242,7 @@ func DefaultShellSpec() ContainerSpec {
 	}
 
 	spec.Capabilities = lib.CapsConfig{
-			AllowCaps: []lib.Capability{lib.CAP_NET_BIND_SERVICE},			
+		AllowCaps: []lib.Capability{lib.CAP_NET_BIND_SERVICE},
 	}
 
 	return spec
@@ -203,7 +250,7 @@ func DefaultShellSpec() ContainerSpec {
 
 func runContainerInit(ctx SupervisorCtx) {
 	unix.Close(ctx.P2C[1])
-	unix.Close(ctx.C2P[0])	
+	unix.Close(ctx.C2P[0])
 
 	os.Stdout.WriteString("[*] Apply Namespaces")
 	err := lib.ApplyNamespaces(spec.Namespaces)
@@ -213,7 +260,7 @@ func runContainerInit(ctx SupervisorCtx) {
 	}
 
 	if spec.Namespaces.AnyEnabled() {
-		os.Stdout.WriteString("\n[*] PARENT-CHILD\n")		
+		os.Stdout.WriteString("\n[*] PARENT-CHILD\n")
 		lib.LogNamespace(ctx.ParentNS, os.Getpid())
 	}
 
@@ -227,16 +274,14 @@ func runContainerInit(ctx SupervisorCtx) {
 
 	os.Stdout.WriteString("[*] 4 - finished like chads\n")
 
-	
-
 	// CONTROLS
 
 	if spec.Namespaces.CGROUP {
 		os.Stdout.WriteString("[*] CGroup\n")
 		lib.SetupCgroups(spec.Namespaces.CGROUP, spec.Cgroups)
-	}		
+	}
 
-	if spec.Namespaces.MOUNT {		
+	if spec.Namespaces.MOUNT {
 
 		pid, err := lib.NewFork()
 		if err != nil {
@@ -245,78 +290,75 @@ func runContainerInit(ctx SupervisorCtx) {
 		}
 
 		lib.SetupRootAndSpawnWorkload(
-			spec.FS, 
-			pid, 
-			spec.Capabilities, 
-			ctx.ParentNS, 
+			spec.FS,
+			pid,
+			spec.Capabilities,
+			ctx.ParentNS,
 			ctx.Init2sup)
 	}
 }
 
 func waitForAnyChild() (int, unix.WaitStatus, error) {
-    var status unix.WaitStatus
-    pid, err := unix.Wait4(-1, &status, 0, nil)
-    if err != nil {
-        return -1, status, err
-    }
-    return pid, status, nil
+	var status unix.WaitStatus
+	pid, err := unix.Wait4(-1, &status, 0, nil)
+	if err != nil {
+		return -1, status, err
+	}
+	return pid, status, nil
 }
 
 func findContainerByPID(containers map[string]*Container, pid int) *Container {
-    for _, c := range containers {
-        if c.WorkloadPID == pid || c.InitPID == pid {
-            return c
-        }
-    }
-    return nil
-}
-
-func signalHandling() chan os.Signal {
-	sigCh := make(chan os.Signal, 16)
-	signal.Notify(
-    sigCh,
-    unix.SIGINT,
-    unix.SIGTERM,
-    unix.SIGQUIT,
-    unix.SIGHUP,
-	)
-	return sigCh
-}
-
-func reapChildren(containers map[string]*Container) {
-	for len(containers) > 0 {
-    pid, _, err := waitForAnyChild()
-    if err != nil {
-        if err == unix.EINTR {
-            continue
-        }
-        break
-    }
-
-    c := findContainerByPID(containers, pid)
-    if c == nil {
-			// orphan or unknown child; still must reap
-			continue
-    }		
-
-		if pid == c.WorkloadPID {
-			c.State = ContainerExited
-			delete(containers, c.Spec.ID)
-    }
+	for _, c := range containers {
+		if c.WorkloadPID == pid || c.InitPID == pid {
+			return c
+		}
 	}
+	return nil
 }
 
-func startSignalForwarder(
-    containers map[string]*Container,
-    sigCh chan os.Signal,
-) {
-    go func() {
-        for sig := range sigCh {
-            for _, c := range containers {
-                if c.WorkloadPID > 0 {
-                    _ = unix.Kill(c.WorkloadPID, sig.(unix.Signal))
-                }
-            }
-        }
-    }()
+func startReaper(events chan<- Event) {
+	go func() {
+		for {
+			pid, status, err := waitForAnyChild()
+			if err != nil {
+				if err == unix.EINTR || err == unix.ECHILD {
+					continue
+				}
+				fmt.Printf("[!] reaper fatal error: %v\n", err)
+				continue
+			}
+
+			events <- Event{
+				Type:   EventChildExit,
+				PID:    pid,
+				Status: status,
+			}
+		}
+	}()
+}
+
+func startSignalHandler(events chan<- Event) chan<- os.Signal {
+	sigCh := make(chan os.Signal, 16)
+
+	signal.Notify(sigCh,
+		unix.SIGINT,
+		unix.SIGTERM,
+		unix.SIGQUIT,
+		unix.SIGHUP,
+	)
+
+	go func() {
+		for sig := range sigCh {
+			s, ok := sig.(unix.Signal)
+			if !ok {
+				continue
+			}
+			events <- Event{
+				Type:   EventSignal,
+				Signal: s,
+			}
+		}
+	}()
+
+	return sigCh
 }

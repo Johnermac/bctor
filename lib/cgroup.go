@@ -236,8 +236,6 @@ func SetupCgroups(CGROUP bool, cfg CGroupsConfig) {
 		"cgroup.procs",
 	}
 
-	
-
 	fmt.Println("[*] Init of TestCGroups")
 
 	if err := CheckCgroupV2(); err != nil {
