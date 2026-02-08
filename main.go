@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 
 	"github.com/Johnermac/bctor/lib"
@@ -16,28 +15,38 @@ func main() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	ctx := sup.RunSupervisor(ctx)
+	//ctx := sup.RunSupervisor(ctx)
 
 	containers := make(map[string]*sup.Container)
 	events := make(chan sup.Event, 32)
-	fmt.Printf("[*] Starting Reaper and Signal Handler\n")
+	fmt.Printf("[*] Supervisor: Starting Reaper and Signal Handler\n")
 	sup.StartReaper(events)
 	sup.StartSignalHandler(events)
 
-	fmt.Printf("[*] Starting Container with default spec\n")
+		
+	fmt.Printf("[!] Supervisor: Starting containers\n")
+	
 
-	c, err := sup.StartContainer(lib.DefaultShellSpec(), ctx, containers)
-	if err != nil {
-		log.Fatal(err)
-	}
+	fmt.Printf("[>] Supervisor: container 1 Flow started\n")
+	spec1 := lib.DefaultShellSpec()
+	spec1.Namespaces.NET = true
+	c1, _ := sup.StartContainer(spec1, sup.NewCtx(), containers)
+	containers[c1.Spec.ID] = c1
 
-	containers[c.Spec.ID] = c
-	fmt.Printf("[*] container added to map: %s\n", c.Spec.ID)
 
-	fmt.Printf("[!] initPID: %d\n", c.InitPID)
-	fmt.Printf("[!] WorkloadPID: %d\n", c.WorkloadPID)
+	fmt.Printf("[>] Supervisor: container 2 Flow started\n")
+	// container 2 JOINS container 1 netns
+	spec2 := lib.DefaultShellSpec()
+	spec2.Namespaces.NET = false
+	spec2.ShareNetNS = c1.NetNS	
+	c1.NetNS.Ref++
 
-	fmt.Printf("[*] Supervisor loop started\n")
+	c2, _ := sup.StartContainer(spec2, sup.NewCtx(), containers)
+	containers[c2.Spec.ID] = c2	
+		
+
+	fmt.Printf("[!] Supervisor: All containers started and running\n")
 	sup.SupervisorLoop(containers, events)
+	//program ended
 
 }

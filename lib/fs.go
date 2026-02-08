@@ -132,30 +132,21 @@ func callHideProc() {
 	}
 }
 
-// little helper
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0755)
-}
-
 func PrepareRoot(cfg FSConfig) error {
 	// 1. Make mounts private (critical)
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
-		return fmt.Errorf("make / private: %w", err)
+		return fmt.Errorf("---[?] Workload: make / private: %w", err)
 	}
 
 	// 2. Bind-mount rootfs onto itself (required for pivot_root)
 
 	if err := os.MkdirAll(cfg.Rootfs, 0755); err != nil {
-		return fmt.Errorf("failed to create rootfs dir: %w", err)
+		return fmt.Errorf("---[?] Workload: Failed to create rootfs dir: %w", err)
 	}
 
 	_, err := os.Stat(cfg.Rootfs)
 	if err != nil {
-		return fmt.Errorf("rootfs stat: %w", err)
+		return fmt.Errorf("---[?] Workload: rootfs stat: %w", err)
 	}
 
 	if err := unix.Mount(
@@ -165,7 +156,7 @@ func PrepareRoot(cfg FSConfig) error {
 		unix.MS_BIND|unix.MS_REC,
 		"",
 	); err != nil {
-		return fmt.Errorf("bind rootfs: %w", err)
+		return fmt.Errorf("---[?] Workload: bind rootfs: %w", err)
 	}
 
 	// 3. Make rootfs mount private explicitly
@@ -176,7 +167,7 @@ func PrepareRoot(cfg FSConfig) error {
 		unix.MS_REC|unix.MS_PRIVATE,
 		"",
 	); err != nil {
-		return fmt.Errorf("make rootfs private: %w", err)
+		return fmt.Errorf("---[?] Workload: make rootfs private: %w", err)
 	}
 
 	// 4. setup busybox shell
@@ -194,7 +185,7 @@ func PrepareRoot(cfg FSConfig) error {
 		f.Close()
 	}
 
-	for _, cmd := range []string{"sh", "ls", "nc"} {
+	for _, cmd := range []string{"sh", "ls", "nc", "ip", "ping"} {
 		target := filepath.Join(binDir, cmd)
 		os.Remove(target)
 		os.Symlink("busybox", target)
@@ -217,13 +208,13 @@ func PrepareRoot(cfg FSConfig) error {
 		f.Close()
 
 		if err := unix.Mount("/dev/"+d, target, "", unix.MS_BIND, ""); err != nil {
-			return fmt.Errorf("bind /dev/%s: %w", d, err)
+			return fmt.Errorf("---[?] Workload: bind /dev/%s: %w", d, err)
 		}
 	}
 
 	// 6. Create pivot directories
 	if err := os.MkdirAll(filepath.Join(cfg.Rootfs, ".pivot_old"), 0700); err != nil {
-		return fmt.Errorf("mkdir oldroot: %w", err)
+		return fmt.Errorf("---[?] Workload: Failed to mkdir oldroot: %w", err)
 	}
 
 	return nil
@@ -234,27 +225,27 @@ func PivotRoot(newRoot string) error {
 
 	// 1. Change to new root (required)
 	if err := unix.Chdir(newRoot); err != nil {
-		return fmt.Errorf("chdir new root: %w", err)
+		return fmt.Errorf("---[?] Workload: chdir new root: %w", err)
 	}
 
 	// 2. pivot_root(newRoot, newRoot/.pivot_old)
 	if err := unix.PivotRoot(newRoot, putOld); err != nil {
-		return fmt.Errorf("pivot_root: %w", err)
+		return fmt.Errorf("---[?] Workload: pivot_root: %w", err)
 	}
 
 	// 3. Now "/" is newRoot
 	if err := unix.Chdir("/"); err != nil {
-		return fmt.Errorf("chdir /: %w", err)
+		return fmt.Errorf("---[?] Workload: chdir /: %w", err)
 	}
 
 	// 4. Unmount old root
 	if err := unix.Unmount("/.pivot_old", unix.MNT_DETACH); err != nil {
-		return fmt.Errorf("umount old root: %w", err)
+		return fmt.Errorf("---[?] Workload: umount old root: %w", err)
 	}
 
 	// 5. Remove old root directory
 	if err := os.RemoveAll("/.pivot_old"); err != nil {
-		return fmt.Errorf("remove old root: %w", err)
+		return fmt.Errorf("---[?] Workload: remove old root: %w", err)
 	}
 
 	return nil
@@ -272,7 +263,7 @@ func MountVirtualFS(cfg FSConfig) error {
 			unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV,
 			"",
 		); err != nil && err != unix.EPERM {
-			return fmt.Errorf("proc mount failed: %w", err)
+			return fmt.Errorf("---[?] Workload: proc mount failed: %w", err)
 		}
 	}
 
@@ -284,7 +275,7 @@ func MountVirtualFS(cfg FSConfig) error {
 			unix.MS_RDONLY|unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV,
 			"",
 		); err != nil && err != unix.EPERM {
-			return fmt.Errorf("sysfs mount failed: %w", err)
+			return fmt.Errorf("---[?] Workload: sysfs mount failed: %w", err)
 		}
 	}
 
@@ -293,7 +284,7 @@ func MountVirtualFS(cfg FSConfig) error {
 
 		for _, dir := range writable {
 			if err := os.MkdirAll(dir, 0755); err != nil {
-				return fmt.Errorf("mkdir %s failed: %w", dir, err)
+				return fmt.Errorf("---[?] Workload: mkdir %s failed: %w", dir, err)
 			}
 
 			if err := unix.Mount(
@@ -303,7 +294,7 @@ func MountVirtualFS(cfg FSConfig) error {
 				unix.MS_NOSUID|unix.MS_NODEV,
 				"size=64M",
 			); err != nil {
-				return fmt.Errorf("mount tmpfs on %s failed: %w", dir, err)
+				return fmt.Errorf("---[?] Workload: mount tmpfs on %s failed: %w", dir, err)
 			}
 		}
 	}
@@ -316,7 +307,7 @@ func MountVirtualFS(cfg FSConfig) error {
 			unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_REC,
 			"",
 		); err != nil {
-			return fmt.Errorf("remount rootfs readonly failed: %w", err)
+			return fmt.Errorf("---[?] Workload: remount rootfs readonly failed: %w", err)
 		}
 	}
 
@@ -326,13 +317,13 @@ func MountVirtualFS(cfg FSConfig) error {
 func FileSystemSetup(fsCfg FSConfig) {
 	// 1. Prepare filesystem (mounts, bind, propagation)
 	if err := PrepareRoot(fsCfg); err != nil {
-		fmt.Fprintln(os.Stderr, "PrepareRoot failed:", err)
+		fmt.Fprintln(os.Stderr, "---[?] Workload: PrepareRoot failed:", err)
 		unix.Exit(1)
 	}
 
 	// 2. pivot_root
 	if err := PivotRoot(fsCfg.Rootfs); err != nil {
-		fmt.Fprintln(os.Stderr, "PivotRoot failed:", err)
+		fmt.Fprintln(os.Stderr, "---[?] Workload: PivotRoot failed:", err)
 		unix.Exit(1)
 	}
 
@@ -343,10 +334,10 @@ func FileSystemSetup(fsCfg FSConfig) {
 
 	// 4. Mount virtual filesystems
 	if err := MountVirtualFS(fsCfg); err != nil {
-		fmt.Fprintln(os.Stderr, "MountVirtualFS failed:", err)
+		fmt.Fprintln(os.Stderr, "---[?] Workload: MountVirtualFS failed:", err)
 		unix.Exit(1)
 	}
 
-	fmt.Println("[*] callHideProc")
+	fmt.Println("---[*] Workload: Calling HideProc")
 	callHideProc()
 }

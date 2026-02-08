@@ -14,12 +14,12 @@ func StartReaper(events chan<- Event) {
 				if err == unix.EINTR || err == unix.ECHILD {
 					continue
 				}
-				fmt.Printf("[!] reaper fatal error: %v\n", err)
+				fmt.Printf("[!] Supervisor: Reaper fatal error: %v\n", err)
 				continue
 			}
 
 			fmt.Printf(
-				"[DBG] reaper: pid=%d exited=%v signaled=%v\n",
+				"[DBG] Supervisor: Reaper: pid=%d exited=%v signaled=%v\n",
 				pid,
 				status.Exited(),
 				status.Signaled(),

@@ -23,9 +23,11 @@ struct sock_filter filter_hello[] = {
     KILL_PROCESS
 };
     
+
 // --- Perfil Workload: Optimized for Netcat (nc) and Go Runtime ---
 struct sock_filter filter_workload[] = {
     VALIDATE_ARCH,
+
     /* Initialization & Memory */
     ALLOW_SYSCALL(execve),       // Execute the binary
     ALLOW_SYSCALL(brk),          // Extend heap memory

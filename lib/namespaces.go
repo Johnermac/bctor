@@ -25,51 +25,56 @@ type NamespaceConfig struct {
 	CGROUP bool
 }
 
-func ApplyNamespaces(cfg NamespaceConfig) error {
-	var flags int
+func ApplyNamespaces(spec *ContainerSpec) error {
+    var flags int
 
-	if cfg.USER {
-		//flags |= unix.CLONE_NEWUSER
-		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
-			return err
+    // USER namespace handled separately
+    if spec.Namespaces.USER {
+        if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
+            return err
+        }
+    }
+
+    switch {
+    case spec.Namespaces.UTS:
+        flags |= unix.CLONE_NEWUTS
+    case spec.Namespaces.MOUNT:
+        flags |= unix.CLONE_NEWNS
+    case spec.Namespaces.PID:
+        flags |= unix.CLONE_NEWPID
+		case spec.Namespaces.IPC:
+        flags |= unix.CLONE_NEWIPC
+    }
+
+    switch {
+		case spec.ShareNetNS != nil:
+			fmt.Printf("--[>] Init: Joining shared netns fd %d\n", spec.ShareNetNS.FD)
+			if err := joinNetNS(spec.ShareNetNS.FD); err != nil {
+				return err
+			}
+
+		case spec.Namespaces.NET:
+			fmt.Println("--[>] Init: Creating new netns")
+			flags |= unix.CLONE_NEWNET
 		}
-	}
+   
 
-	if cfg.UTS {
-		flags |= unix.CLONE_NEWUTS
-	}
-	if cfg.MOUNT {
-		flags |= unix.CLONE_NEWNS
-	}
-	if cfg.PID {
-		flags |= unix.CLONE_NEWPID
-	}
-	if cfg.NET {
-		flags |= unix.CLONE_NEWNET
-	}
-	if cfg.IPC {
-		flags |= unix.CLONE_NEWIPC
-	}
+    if flags == 0 { return nil }
 
-	if flags == 0 {
-		return nil
-	}
+    if err := unix.Unshare(flags); err != nil {
+        return fmt.Errorf("--[?] unshare failed: %v", err)
+    }
 
-	err := unix.Unshare(flags)
-	if err != nil {
-		return fmt.Errorf("unshare falhou: %v", err)
-	}
+    if err := flagsChecks(spec); err != nil {
+        return fmt.Errorf("--[?] flag check failed: %v", err)
+    }
 
-	err = flagsChecks(cfg)
-	if err != nil {
-		return fmt.Errorf("flag check falhou: %v", err)
-	}
-
-	return nil
+    return nil
 }
 
-func flagsChecks(cfg NamespaceConfig) error {
-	if cfg.MOUNT {
+
+func flagsChecks(spec *ContainerSpec) error {
+	if spec.Namespaces.MOUNT {
 		// This is equivalent to 'mount --make-rprivate /'
 		// It ensures child mounts don't leak to the parent system
 		err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, "")
@@ -78,25 +83,25 @@ func flagsChecks(cfg NamespaceConfig) error {
 		}
 	}
 
-	if cfg.NET {
+	if spec.Namespaces.NET {
 
 		// Bring up loopback using netlink
 		lo, err := netlink.LinkByName("lo")
 		if err != nil {
-			return fmt.Errorf("cannot find lo: %w", err)
+			return fmt.Errorf("--[?] Init: cannot find lo: %w", err)
 		}
 		if err := netlink.LinkSetUp(lo); err != nil {
-			return fmt.Errorf("cannot bring up lo: %w", err)
+			return fmt.Errorf("--[?] Init: cannot bring up lo: %w", err)
 		}
-
 		// interfaces
 		links, _ := netlink.LinkList()
 		for _, l := range links {
-			fmt.Printf("[*] %v: %v\n", l.Attrs().Name, l.Attrs().Flags)
-		}
+			fmt.Printf("--[*] Init: %v: %v\n", l.Attrs().Name, l.Attrs().Flags)
+		}		
+		
 	}
 
-	if cfg.IPC {
+	if spec.Namespaces.IPC {
 		// todo later some implmentation
 		// for now the ns-ipc works for poc
 

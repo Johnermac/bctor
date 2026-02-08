@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"encoding/binary"
 	"fmt"
 	"os"
 	"syscall"
@@ -9,119 +8,112 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type WorkloadSpec struct {
-	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
-	Args []string
-	Env  []string
-}
 
-var WorkloadRegistry = map[Profile]WorkloadSpec{
-	ProfileDebugShell: {
-		Path: "/bin/sh",
-		Args: []string{"sh"},
-		Env:  []string{"PATH=/bin"},
-	},
-	ProfileWorkload: {
-		Path: "/bin/nc",
-		Args: []string{"nc", "-lp", "80"},
-		Env:  os.Environ(),
-	},
-}
 
 func SetupRootAndSpawnWorkload(
-	fsCfg FSConfig,
+	spec *ContainerSpec,
 	pid uintptr,
-	cfg CapsConfig,
-	p *NamespaceState,
-	init2sup [2]int) {
+	ctx SupervisorCtx) {
 
+	fmt.Printf("--[!] Init: Second fork done\n")
 	if pid == 0 {
-		unix.Close(init2sup[0])
+		unix.Close(ctx.Init2sup[0])
 
-		fmt.Println("[*] File System Setup")
-		FileSystemSetup(fsCfg)
+		fmt.Println("---[*] Workload: File System Setup")
+		FileSystemSetup(spec.FS)
 
-		os.Stdout.WriteString("[*] Applying Capabilities isolation\n")
-		SetupCapabilities(cfg)
+		os.Stdout.WriteString("---[*] Workload: Applying Capabilities isolation\n")
+		SetupCapabilities(spec.Capabilities)
 
-		fmt.Println("[*] Run Workload")
-		runWorkload()
+		profile := ProfileIpLink //set to arg in the future
+		/*fmt.Println("[*] Apply Seccomp Profile:", profile)
+		err := ApplySeccomp(profile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
+		}*/
+
+		fmt.Println("---[*] Workload: Run Workload")
+		runWorkload(profile)
 
 		// If we get here, exec failed
-		fmt.Fprintln(os.Stderr, "[?] workload returned unexpectedly")
+		fmt.Fprintln(os.Stderr, "---[?] Workload: Returned unexpectedly")
 		unix.Exit(127)
 
 	} else {
 		fmt.Printf(
-			"[DBG] container-init: PID=%d waiting for child PID=%d\n",
+			"--[DBG] Init: container-init: PID=%d waiting for child PID=%d\n",
 			os.Getpid(), pid,
 		)
 		// notify supervisor of workload PID
-		subReaper(int(pid), init2sup)
+		initWorkloadHandling(spec, int(pid), ctx)
 	}
 }
 
-func runWorkload() {
+func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ctx SupervisorCtx) {		
 
-	profile := ProfileHello //set to arg in the future
-	fmt.Println("[*] Apply Seccomp Profile:", profile)
-	err := ApplySeccomp(profile)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
+	if spec.Namespaces.NET {
+		// creator container
+		netnsFD, err := unix.Open("/proc/self/ns/net", unix.O_PATH, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "--[?] Failed to open netns fd: %v\n", err)
+			return 
+		}
+
+		fmt.Printf("--[>] Init: Sending netns fd=%d and workload PID=%d to supervisor\n",
+			netnsFD, workloadPID,
+		)
+		SendWorkloadPIDAndNetNS(ctx, workloadPID, netnsFD)
+	} else {
+		// joining container
+		fmt.Printf("--[>] Init: Sending workload PID=%d to supervisor\n", workloadPID)
+		SendWorkloadPID(ctx, workloadPID)
 	}
 
+
+	var status unix.WaitStatus
+	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)
+
+	fmt.Printf(
+		"--[DBG] Init: Wait returned: wpid=%d exited=%v signaled=%v status=%v\n",
+		wpid,
+		status.Exited(),
+		status.Signaled(),
+		status,
+	)	
+
+	if status.Exited() {
+		fmt.Printf("--[DBG] Init: Exiting with %d\n", status.ExitStatus())
+		os.Exit(status.ExitStatus())
+	}
+	if status.Signaled() {
+		fmt.Printf("--[DBG] Init: Exiting via signal %d\n", status.Signal())
+		os.Exit(128 + int(status.Signal()))
+	}
+
+	fmt.Println("--[DBG] Init: Exiting cleanly")
+	os.Exit(0)
+}
+
+func runWorkload(profile Profile) {	
+
 	if profile == ProfileHello {
-		syscall.Write(1, []byte("\n[!] Hello Seccomp!\n"))
+		syscall.Write(1, []byte("\n---[!] EXEC: Hello Seccomp!\n"))
 		syscall.Exit(0)
 	}
 
 	if spec, ok := WorkloadRegistry[profile]; ok {
-		fmt.Printf("[*] Executing: %s %v\n", spec.Path, spec.Args)
+		fmt.Printf("---[*] Executing: %s %v\n", spec.Path, spec.Args)
 
 		err := unix.Exec(spec.Path, spec.Args, spec.Env)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Exec failed for %s: %v\n", spec.Path, err)
+			fmt.Fprintf(os.Stderr, "---[?] Exec failed for %s: %v\n", spec.Path, err)
 			os.Exit(1)
 		}
 	} else {
-		fmt.Fprintln(os.Stderr, "No workload spec found for this profile")
+		fmt.Fprintln(os.Stderr, "---[?] No workload spec found for this profile")
 		os.Exit(1)
 	}
 
 	// unreachable
 	unix.Exit(0)
-}
-
-func subReaper(workloadPID int, init2sup [2]int) {
-	fmt.Printf("[*] container-init > Send workload PID: %d\n", workloadPID)
-
-	// notify supervisor of workload PID
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(workloadPID))
-	_, _ = unix.Write(init2sup[1], buf)
-	unix.Close(init2sup[1])
-
-	var status unix.WaitStatus
-	wpid, err := unix.Wait4(workloadPID, &status, 0, nil)
-
-	fmt.Printf(
-		"[DBG] container-init wait returned: wpid=%d exited=%v signaled=%v status=%v err=%v\n",
-		wpid,
-		status.Exited(),
-		status.Signaled(),
-		status,
-		err,
-	)
-
-	if status.Exited() {
-		fmt.Printf("[DBG] container-init exiting with %d\n", status.ExitStatus())
-		os.Exit(status.ExitStatus())
-	}
-	if status.Signaled() {
-		fmt.Printf("[DBG] container-init exiting via signal %d\n", status.Signal())
-		os.Exit(128 + int(status.Signal()))
-	}
-
-	fmt.Println("[DBG] container-init exiting cleanly")
-	os.Exit(0)
 }
