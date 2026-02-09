@@ -7,7 +7,7 @@ import (
 )
 
 func SupervisorLoop(containers map[string]*Container, events <-chan Event) {
-	
+
 	fmt.Println("[!] Supervisor running")
 	fmt.Printf("[DBG] Supervisor: Len of containers: %d\n", len(containers))
 

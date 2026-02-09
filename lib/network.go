@@ -9,8 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-
-
 func joinNetNS(fd int) error {
 	return unix.Setns(fd, unix.CLONE_NEWNET)
 }
@@ -25,7 +23,6 @@ func SendWorkPIDUserNetNS(ipc *IPC, pid int, usernsFD int, netnsFD int) error {
 
 	return unix.Sendmsg(ipc.Init2Sup[1], buf, oob, nil, 0)
 }
-
 
 // Supervisor (creator) → receive workload PID + userns FD + netns FD
 func RecvWorkPIDUserNetNS(ipc *IPC) (pid int, usernsFD int, netnsFD int) {
@@ -53,12 +50,10 @@ func RecvWorkPIDUserNetNS(ipc *IPC) (pid int, usernsFD int, netnsFD int) {
 	}
 
 	usernsFD = fds[0]
-	netnsFD  = fds[1]
+	netnsFD = fds[1]
 
 	return
 }
-
-
 
 // Joining container → Supervisor: send workload PID only
 func SendWorkloadPID(ipc *IPC, pid int) error {
@@ -82,13 +77,11 @@ func RecvWorkloadPID(ipc *IPC) int {
 	return int(binary.LittleEndian.Uint32(buf))
 }
 
-
 // Supervisor → joiner init: send userns + netns
 func SendUserNetNSFD(ipc *IPC, usernsFD int, netnsFD int) error {
 	oob := unix.UnixRights(usernsFD, netnsFD)
 	return unix.Sendmsg(ipc.Sup2Init[1], nil, oob, nil, 0)
 }
-
 
 // Joiner init ← Supervisor: receive userns + netns
 func RecvUserNetNSFD(ipc *IPC) (int, int) {
@@ -103,14 +96,11 @@ func RecvUserNetNSFD(ipc *IPC) (int, int) {
 	return fds[0], fds[1]
 }
 
-
-
-
 // Wait for the supervisor to signal that USER namespace setup is complete
 func WaitForUserNSSetup(syncFD int) error {
-		var buf [1]byte
-		_, err := unix.Read(syncFD, buf[:])
-		return err
+	var buf [1]byte
+	_, err := unix.Read(syncFD, buf[:])
+	return err
 }
 
 func SetupUserNSAndContinue(pid int, syncFD int) error {
@@ -137,5 +127,3 @@ func SetupUserNSAndContinue(pid int, syncFD int) error {
 	_, err := unix.Write(syncFD, []byte{1})
 	return err
 }
-
-

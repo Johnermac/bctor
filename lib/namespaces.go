@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -26,20 +27,19 @@ type NamespaceConfig struct {
 }
 
 func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
-
 	var flags int
 	var userfd, netfd int
 
 	sharingUser := spec.ShareUserNS != nil
-	sharingNet  := spec.ShareNetNS != nil
-	creatingUser := spec.Namespaces.USER && !sharingUser	
+	sharingNet := spec.ShareNetNS != nil
+	creatingUser := spec.Namespaces.USER && !sharingUser
 
 	if sharingUser || sharingNet {
 		fmt.Printf("--[>] Init: RecvUserNetNSFD\n")
 		userfd, netfd = RecvUserNetNSFD(ipc)
 		fmt.Printf("--[>] Init: UserFD=%d and NetFD=%d\n", userfd, netfd)
 		unix.Close(ipc.Sup2Init[0])
-	} 	
+	}
 
 	// ---- USER namespace ----
 	if sharingUser {
@@ -55,13 +55,18 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 			return fmt.Errorf("unshare(user): %w", err)
 		}
 
+		// Signal supervisor: userns is ready
+		unix.Write(ipc.UserNSReady[1], []byte{1})
+		unix.Close(ipc.UserNSReady[1])
+
 		// Wait for uid/gid maps
-		fmt.Printf("--[>] Init: Handshake\n")
+		fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
 		if err := WaitForUserNSSetup(ipc.UserNSPipe[0]); err != nil {
 			return fmt.Errorf("--[?] wait user ns setup failed: %w", err)
 		}
 		unix.Close(ipc.UserNSPipe[0])
 		unix.Close(ipc.UserNSPipe[1])
+
 	}
 
 	// ---- NET namespace ----
@@ -77,33 +82,33 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 		flags |= unix.CLONE_NEWNET
 	}
 
-
 	if spec.Namespaces.UTS {
-			flags |= unix.CLONE_NEWUTS
+		flags |= unix.CLONE_NEWUTS
 	}
 	if spec.Namespaces.MOUNT {
-			flags |= unix.CLONE_NEWNS
+		flags |= unix.CLONE_NEWNS
 	}
 	if spec.Namespaces.PID {
-			flags |= unix.CLONE_NEWPID
+		flags |= unix.CLONE_NEWPID
 	}
 	if spec.Namespaces.IPC {
-			flags |= unix.CLONE_NEWIPC
-	}	
+		flags |= unix.CLONE_NEWIPC
+	}
 
-	if flags == 0 { return nil }
+	if flags == 0 {
+		return nil
+	}
 
 	if err := unix.Unshare(flags); err != nil {
-			return fmt.Errorf("--[?] unshare failed: %v", err)
+		return fmt.Errorf("--[?] unshare failed: %v", err)
 	}
 
 	if err := flagsChecks(spec); err != nil {
-			return fmt.Errorf("--[?] flag check failed: %v", err)
+		return fmt.Errorf("--[?] flag check failed: %v", err)
 	}
 
 	return nil
 }
-
 
 func flagsChecks(spec *ContainerSpec) error {
 	if spec.Namespaces.MOUNT {
@@ -129,8 +134,8 @@ func flagsChecks(spec *ContainerSpec) error {
 		links, _ := netlink.LinkList()
 		for _, l := range links {
 			fmt.Printf("--[*] Init: %v: %v\n", l.Attrs().Name, l.Attrs().Flags)
-		}		
-		
+		}
+
 	}
 
 	if spec.Namespaces.IPC {

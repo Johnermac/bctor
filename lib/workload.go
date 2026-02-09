@@ -8,21 +8,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-
-
 func SetupRootAndSpawnWorkload(
 	spec *ContainerSpec,
 	pid uintptr,
 	ipc *IPC) {
 
-	
-	if pid == 0 {	
-		
+	if pid == 0 {
+
 		if spec.Namespaces.MOUNT {
 			fmt.Println("---[*] Workload: File System Setup")
 			FileSystemSetup(spec.FS)
 		}
-		
+
 		os.Stdout.WriteString("---[*] Workload: Applying Capabilities isolation\n")
 		SetupCapabilities(spec.Capabilities)
 
@@ -48,7 +45,7 @@ func SetupRootAndSpawnWorkload(
 		)
 		// notify supervisor of workload PID
 		initWorkloadHandling(spec, int(pid), ipc)
-	}	
+	}
 }
 
 func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
@@ -94,7 +91,7 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 		status.Exited(),
 		status.Signaled(),
 		status,
-	)	
+	)
 
 	if status.Exited() {
 		fmt.Printf("--[DBG] Init: Exiting with %d\n", status.ExitStatus())
@@ -109,7 +106,7 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	os.Exit(0)
 }
 
-func runWorkload(profile Profile) {	
+func runWorkload(profile Profile) {
 
 	if profile == ProfileHello {
 		syscall.Write(1, []byte("\n---[!] EXEC: Hello Seccomp!\n"))
@@ -123,11 +120,11 @@ func runWorkload(profile Profile) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "---[?] Exec failed for %s: %v\n", spec.Path, err)
 			os.Exit(1)
-		}		
+		}
 	} else {
 		fmt.Fprintln(os.Stderr, "---[?] No workload spec found for this profile")
 		os.Exit(1)
-	}	
+	}
 
 	// unreachable
 	unix.Exit(0)

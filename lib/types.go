@@ -14,29 +14,27 @@ type ContainerSpec struct {
 	Cgroups      CGroupsConfig // nil = disabled
 	Seccomp      Profile
 	Workload     WorkloadSpec
-	ShareNetNS 	*NetNamespace
-	ShareUserNS *UserNamespace
+	ShareNetNS   *NetNamespace
+	ShareUserNS  *UserNamespace
 }
 
 type SupervisorCtx struct {
-	ParentNS 			*NamespaceState
-	UserNS 				*UserNamespace
-	NetNS    			*NetNamespace // pointer to owned netns
-	ChildPID 			uintptr   // init pid
-	WorkPID 			uintptr   // workload pid
+	ParentNS *NamespaceState
+	UserNS   *UserNamespace
+	NetNS    *NetNamespace // pointer to owned netns
+	ChildPID uintptr       // init pid
+	WorkPID  uintptr       // workload pid
 }
 
 type NetNamespace struct {
-  FD  	int    // open netns fd (O_PATH)
-  Ref  	int		
-}
-
-type UserNamespace struct {
-	FD  int   // open /proc/<pid>/ns/user (O_PATH)
+	FD  int // open netns fd (O_PATH)
 	Ref int
 }
 
-
+type UserNamespace struct {
+	FD  int // open /proc/<pid>/ns/user (O_PATH)
+	Ref int
+}
 
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
@@ -65,13 +63,13 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 func DefaultShellSpec() *ContainerSpec {
 	spec := &ContainerSpec{}
 	spec.Namespaces = NamespaceConfig{
-		USER:  true, //almost everything needs this enabled
-		MOUNT: true,
+		USER:   true, //almost everything needs this enabled
+		MOUNT:  true,
 		CGROUP: false, //needs root cause /sys/fs/cgroup
-		PID: false,
-		UTS: false,
-		NET: false, // set to true for container 1, container 2 will join this netns 
-		IPC: false,
+		PID:    false,
+		UTS:    false,
+		NET:    false, // set to true for container 1, container 2 will join this netns
+		IPC:    false,
 	}
 
 	spec.FS = FSConfig{

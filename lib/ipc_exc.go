@@ -3,9 +3,10 @@ package lib
 import "golang.org/x/sys/unix"
 
 type IPC struct {
-	UserNSPipe 	[2]int // pipe	
-	Init2Sup 		[2]int // unix socket
-	Sup2Init 		[2]int // unix socket
+	UserNSPipe  [2]int // pipe
+	UserNSReady [2]int // pipe
+	Init2Sup    [2]int // unix socket
+	Sup2Init    [2]int // unix socket
 }
 
 func NewIPC() (*IPC, error) {
@@ -15,7 +16,11 @@ func NewIPC() (*IPC, error) {
 
 	if err = unix.Pipe(c.UserNSPipe[:]); err != nil {
 		return nil, err
-	}	
+	}
+
+	if err = unix.Pipe(c.UserNSReady[:]); err != nil {
+		return nil, err
+	}
 
 	fds, err = unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET, 0)
 	if err != nil {
@@ -31,4 +36,3 @@ func NewIPC() (*IPC, error) {
 
 	return &c, nil
 }
-

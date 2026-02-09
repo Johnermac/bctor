@@ -59,8 +59,6 @@ func writeGIDMap(pidStr string) error {
 	return os.WriteFile("/proc/"+pidStr+"/gid_map", []byte(data), 0644)
 }
 
-
-
 func HideProcPaths(paths []string) error {
 	for _, p := range paths {
 		st, err := os.Stat(p)
