@@ -1,10 +1,8 @@
 package sup
 
 import (
-	"encoding/binary"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/Johnermac/bctor/lib"
 	"golang.org/x/sys/unix"
@@ -27,128 +25,127 @@ type Container struct {
 	WorkloadPID int
 	State       ContainerState
 	NetNS       *lib.NetNamespace
+	UserNS      *lib.UserNamespace
 }
 
-func StartContainer(spec *lib.ContainerSpec, ctx lib.SupervisorCtx, containers map[string]*Container) (*Container, error) {
+func StartContainer(
+	spec *lib.ContainerSpec, 
+	scx lib.SupervisorCtx, 
+	containers map[string]*Container,
+	ipc *lib.IPC,
+	) (*Container, error) {
 	
-	ctx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())
+	//unix.Close(ipc.UserNSPipe[0])
+	scx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())	
 
 	var err error
-	ctx.ChildPID, err = lib.NewFork()
+	scx.ChildPID, err = lib.NewFork()
 	if err != nil {
 		return nil, err
 	}		
-	fmt.Printf("[!] Supervisor: First fork done\n")
+	
+	
 
-	if ctx.ChildPID == 0 {
-		RunContainerInit(ctx, spec)
-		//return nil, nil
+	if scx.ChildPID == 0 {
+		RunContainerInit(scx, spec, ipc)		
 	} else {
-		PipeHandshake(ctx)
+		fmt.Printf("[!] Supervisor: First fork done\n")		
+		
+		// Only setup uid/gid maps for creator containers
+		// Joiner containers join the creator's user NS which already has maps
+		if spec.ShareUserNS == nil {
+			if err := lib.SetupUserNSAndContinue(int(scx.ChildPID), ipc.UserNSPipe[1]); err != nil {
+				fmt.Fprintf(os.Stderr, "[?] Supervisor: SetupUserNSAndContinue failed: %v\n", err)
+				return nil, err
+			}
+		} else {
+			// For joiner: just signal the child to continue, no maps to set
+			unix.Write(ipc.UserNSPipe[1], []byte{1})
+		}
+		unix.Close(ipc.UserNSPipe[1])
+		unix.Close(ipc.UserNSPipe[0])
+		
+		// Send namespaces only for joiner containers
+		if spec.ShareNetNS != nil {
+			fmt.Printf(
+				"[>] Supervisor: Sending UserNS FD=%d and NetNS FD=%d to container-init\n",
+				spec.ShareUserNS.FD,
+				spec.ShareNetNS.FD,
+			)
+
+			lib.SendUserNetNSFD(
+				ipc,
+				spec.ShareUserNS.FD,
+				spec.ShareNetNS.FD,
+			)
+		}
 	}		
 
-	fmt.Printf("[>] Supervisor: Sending NetNS FD to container-init\n")
-	if spec.ShareNetNS != nil { lib.SendNetNSFD(ctx, spec.ShareNetNS.FD) }
-
+	unix.Close(ipc.Sup2Init[1])
+	
 
 	containers[spec.ID] = &Container{
 		Spec:    spec,
-		InitPID: int(ctx.ChildPID),
+		InitPID: int(scx.ChildPID),
 		State:   ContainerCreated,
 	}	
 	
 	fmt.Printf("[>] Supervisor: After handshake, waiting for workload PID from container-init\n")
 	
-	c := FinalizeContainer(ctx, spec, containers, containers[spec.ID].InitPID)	
-	//fmt.Printf("[>] Supervisor: container added to map: %s\n", c.Spec.ID)
-
+	c := FinalizeContainer(scx, spec, containers, containers[spec.ID].InitPID, ipc)	
 	return c, nil			
 }
 
-func PipeHandshake(ctx lib.SupervisorCtx) {
-	unix.Close(ctx.P2C[0]) // parent writes only
-	unix.Close(ctx.C2P[1]) // parent reads only
-	
-
-	// 1. wait for container-init to signal "alive"
-	buf := make([]byte, 1)
-	if _, err := unix.Read(ctx.C2P[0], buf); err != nil {
-		panic("[?] Supervisor: Handshake: failed to read child ready signal")
-	}
-
-	fmt.Println("[2] Supervisor: container-init is alive, setting up user namespace")
-
-	// 2. setup user namespace for container-init
-	pidStr := strconv.Itoa(int(ctx.ChildPID))
-	if err := lib.SetupUserNamespace(pidStr); err != nil {
-		fmt.Println("[?] Supervisor: Error SetupUserNamespace:", err)
-		unix.Exit(1)
-	}
-
-	fmt.Println("[3] Supervisor: parent set up user namespace and allowed continuation")
-	
-	// 3. allow child to continue
-	if _, err := unix.Write(ctx.P2C[1], []byte{1}); err != nil {
-		panic("[?] Supervisor: Handshake failed to signal continue")
-	}
-
-	// 4. close write end → child observes EOF (sync point)
-	unix.Close(ctx.P2C[1])
-
-	// optional: drain + close
-	unix.Read(ctx.C2P[0], buf)
-	unix.Close(ctx.C2P[0])
-}
-
-func GetPipeContent(ctx lib.SupervisorCtx) int {
-	buf := make([]byte, 8)
-	unix.Read(ctx.Init2sup[0], buf)
-	PID := int(binary.LittleEndian.Uint64(buf))
-	fmt.Printf("[*] Supervisor: received PID=%d\n", PID)
-	return PID
-}
 
 func FinalizeContainer(
-	ctx lib.SupervisorCtx,
+	scx lib.SupervisorCtx,
 	spec *lib.ContainerSpec,
 	containers map[string]*Container,
 	initPID int,
+	ipc *lib.IPC,
 ) *Container {
 
 	var c *Container
 
 	if spec.Namespaces.NET {
 		// creator container
-		workloadPID, netnsFD := lib.RecvWorkloadPIDAndNetNS(ctx)
-		fmt.Printf("[>] Supervisor: received workload PID=%d and netns FD=%d from container-init\n",
-			workloadPID, netnsFD,
-		)		
+		workloadPID, usernsFD, netnsFD := lib.RecvWorkPIDUserNetNS(ipc)		
+		fmt.Printf("[>] Supervisor: received workload PID=%d netns FD=%d user FD=%d from container-init\n", workloadPID, netnsFD, usernsFD)
 
-		ctx.NetNS = &lib.NetNamespace{
+		scx.UserNS = &lib.UserNamespace{
+			FD:  usernsFD,
+			Ref: 1,
+		}
+		scx.NetNS = &lib.NetNamespace{
 			FD:  netnsFD,
 			Ref: 1,
 		}
 
 		c = &Container{
 			Spec:        spec,
-			InitPID:     int(ctx.ChildPID),
+			InitPID:     int(scx.ChildPID),
 			WorkloadPID: workloadPID,
 			State:       ContainerRunning,
-			NetNS:       ctx.NetNS,
+			NetNS:       scx.NetNS,		
+			UserNS:      scx.UserNS,
 		}
+		
 	} else {
 		// joining container
-		workloadPID := lib.RecvWorkloadPID(ctx)
+		workloadPID := lib.RecvWorkloadPID(ipc)
 		fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
 
 		c = &Container{
 			Spec:        spec,
-			InitPID:     int(ctx.ChildPID),
+			InitPID:     int(scx.ChildPID),
 			WorkloadPID: workloadPID,
 			State:       ContainerRunning,
 			NetNS:       spec.ShareNetNS,
-		}
-	}
+			UserNS:      spec.ShareUserNS,
+		}		
+	}		
+	unix.Close(ipc.Init2Sup[0])
+	unix.Close(ipc.Sup2Init[0])
 
 	containers[spec.ID] = c
 	return c

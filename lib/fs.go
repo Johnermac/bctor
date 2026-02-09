@@ -59,21 +59,7 @@ func writeGIDMap(pidStr string) error {
 	return os.WriteFile("/proc/"+pidStr+"/gid_map", []byte(data), 0644)
 }
 
-func SetupUserNamespace(pidStr string) error {
 
-	if err := writeUIDMap(pidStr); err != nil {
-		return fmt.Errorf("uid_map: %w", err)
-	}
-
-	if err := denySetgroups(pidStr); err != nil {
-		return fmt.Errorf("setgroups: %w", err)
-	}
-
-	if err := writeGIDMap(pidStr); err != nil {
-		return fmt.Errorf("gid_map: %w", err)
-	}
-	return nil
-}
 
 func HideProcPaths(paths []string) error {
 	for _, p := range paths {

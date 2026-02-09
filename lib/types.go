@@ -15,28 +15,28 @@ type ContainerSpec struct {
 	Seccomp      Profile
 	Workload     WorkloadSpec
 	ShareNetNS 	*NetNamespace
+	ShareUserNS *UserNamespace
 }
 
 type SupervisorCtx struct {
-	ParentNS *NamespaceState
-	NetNS 	 *NetNamespace
-	P2C      [2]int
-	C2P      [2]int
-	Init2sup [2]int
-	ChildPID uintptr	
-	NetNSFD int
+	ParentNS 			*NamespaceState
+	UserNS 				*UserNamespace
+	NetNS    			*NetNamespace // pointer to owned netns
+	ChildPID 			uintptr   // init pid
+	WorkPID 			uintptr   // workload pid
 }
 
-/*
-type SupervisorCtx struct {
-	ParentNS *NamespaceState
-	NetNS    *NetNamespace
-
-	ChildPID uintptr   // init pid
-	WorkPID  uintptr   // workload pid (important)
-	NetNSFD  int       // fd to netns
+type NetNamespace struct {
+  FD  	int    // open netns fd (O_PATH)
+  Ref  	int		
 }
-*/
+
+type UserNamespace struct {
+	FD  int   // open /proc/<pid>/ns/user (O_PATH)
+	Ref int
+}
+
+
 
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
@@ -91,7 +91,7 @@ func DefaultShellSpec() *ContainerSpec {
 	}
 
 	spec.Capabilities = CapsConfig{
-		AllowCaps: []Capability{CAP_NET_BIND_SERVICE},
+		AllowCaps: []Capability{CAP_SYS_ADMIN},
 	}
 
 	return spec

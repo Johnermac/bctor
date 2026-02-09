@@ -25,51 +25,83 @@ type NamespaceConfig struct {
 	CGROUP bool
 }
 
-func ApplyNamespaces(spec *ContainerSpec) error {
-    var flags int
+func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 
-    // USER namespace handled separately
-    if spec.Namespaces.USER {
-        if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
-            return err
-        }
-    }
+	var flags int
+	var userfd, netfd int
 
-    switch {
-    case spec.Namespaces.UTS:
-        flags |= unix.CLONE_NEWUTS
-    case spec.Namespaces.MOUNT:
-        flags |= unix.CLONE_NEWNS
-    case spec.Namespaces.PID:
-        flags |= unix.CLONE_NEWPID
-		case spec.Namespaces.IPC:
-        flags |= unix.CLONE_NEWIPC
-    }
+	sharingUser := spec.ShareUserNS != nil
+	sharingNet  := spec.ShareNetNS != nil
+	creatingUser := spec.Namespaces.USER && !sharingUser	
 
-    switch {
-		case spec.ShareNetNS != nil:
-			fmt.Printf("--[>] Init: Joining shared netns fd %d\n", spec.ShareNetNS.FD)
-			if err := joinNetNS(spec.ShareNetNS.FD); err != nil {
-				return err
-			}
+	if sharingUser || sharingNet {
+		fmt.Printf("--[>] Init: RecvUserNetNSFD\n")
+		userfd, netfd = RecvUserNetNSFD(ipc)
+		fmt.Printf("--[>] Init: UserFD=%d and NetFD=%d\n", userfd, netfd)
+		unix.Close(ipc.Sup2Init[0])
+	} 	
 
-		case spec.Namespaces.NET:
-			fmt.Println("--[>] Init: Creating new netns")
-			flags |= unix.CLONE_NEWNET
+	// ---- USER namespace ----
+	if sharingUser {
+		fmt.Printf("--[>] Init: Joining shared userns fd=%d\n", userfd)
+		spec.ShareUserNS.FD = userfd
+		if err := unix.Setns(spec.ShareUserNS.FD, unix.CLONE_NEWUSER); err != nil {
+			return fmt.Errorf("setns(user): %w", err)
 		}
-   
+		unix.Close(userfd)
+	} else if creatingUser {
+		fmt.Printf("--[>] Init: Creating new userns\n")
+		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
+			return fmt.Errorf("unshare(user): %w", err)
+		}
 
-    if flags == 0 { return nil }
+		// Wait for uid/gid maps
+		fmt.Printf("--[>] Init: Handshake\n")
+		if err := WaitForUserNSSetup(ipc.UserNSPipe[0]); err != nil {
+			return fmt.Errorf("--[?] wait user ns setup failed: %w", err)
+		}
+		unix.Close(ipc.UserNSPipe[0])
+		unix.Close(ipc.UserNSPipe[1])
+	}
 
-    if err := unix.Unshare(flags); err != nil {
-        return fmt.Errorf("--[?] unshare failed: %v", err)
-    }
+	// ---- NET namespace ----
+	if sharingNet {
+		fmt.Printf("--[>] Init: Joining shared netns fd=%d\n", netfd)
+		spec.ShareNetNS.FD = netfd
+		if err := joinNetNS(spec.ShareNetNS.FD); err != nil {
+			return fmt.Errorf("setns(net): %w", err)
+		}
+		unix.Close(netfd)
+	} else if spec.Namespaces.NET {
+		fmt.Printf("--[>] Init: Creating new netns\n")
+		flags |= unix.CLONE_NEWNET
+	}
 
-    if err := flagsChecks(spec); err != nil {
-        return fmt.Errorf("--[?] flag check failed: %v", err)
-    }
 
-    return nil
+	if spec.Namespaces.UTS {
+			flags |= unix.CLONE_NEWUTS
+	}
+	if spec.Namespaces.MOUNT {
+			flags |= unix.CLONE_NEWNS
+	}
+	if spec.Namespaces.PID {
+			flags |= unix.CLONE_NEWPID
+	}
+	if spec.Namespaces.IPC {
+			flags |= unix.CLONE_NEWIPC
+	}	
+
+	if flags == 0 { return nil }
+
+	if err := unix.Unshare(flags); err != nil {
+			return fmt.Errorf("--[?] unshare failed: %v", err)
+	}
+
+	if err := flagsChecks(spec); err != nil {
+			return fmt.Errorf("--[?] flag check failed: %v", err)
+	}
+
+	return nil
 }
 
 

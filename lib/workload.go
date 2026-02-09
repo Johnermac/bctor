@@ -13,15 +13,16 @@ import (
 func SetupRootAndSpawnWorkload(
 	spec *ContainerSpec,
 	pid uintptr,
-	ctx SupervisorCtx) {
+	ipc *IPC) {
 
-	fmt.Printf("--[!] Init: Second fork done\n")
-	if pid == 0 {
-		unix.Close(ctx.Init2sup[0])
-
-		fmt.Println("---[*] Workload: File System Setup")
-		FileSystemSetup(spec.FS)
-
+	
+	if pid == 0 {	
+		
+		if spec.Namespaces.MOUNT {
+			fmt.Println("---[*] Workload: File System Setup")
+			FileSystemSetup(spec.FS)
+		}
+		
 		os.Stdout.WriteString("---[*] Workload: Applying Capabilities isolation\n")
 		SetupCapabilities(spec.Capabilities)
 
@@ -40,35 +41,49 @@ func SetupRootAndSpawnWorkload(
 		unix.Exit(127)
 
 	} else {
+		fmt.Printf("--[!] Init: Second fork done\n")
 		fmt.Printf(
 			"--[DBG] Init: container-init: PID=%d waiting for child PID=%d\n",
 			os.Getpid(), pid,
 		)
 		// notify supervisor of workload PID
-		initWorkloadHandling(spec, int(pid), ctx)
-	}
+		initWorkloadHandling(spec, int(pid), ipc)
+	}	
 }
 
-func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ctx SupervisorCtx) {		
-
+func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	if spec.Namespaces.NET {
 		// creator container
-		netnsFD, err := unix.Open("/proc/self/ns/net", unix.O_PATH, 0)
+
+		usernsFD, err := unix.Open("/proc/self/ns/user", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "--[?] Failed to open netns fd: %v\n", err)
-			return 
+			fmt.Fprintf(os.Stderr, "--[?] Failed to open userns fd: %v\n", err)
+			return
 		}
 
-		fmt.Printf("--[>] Init: Sending netns fd=%d and workload PID=%d to supervisor\n",
-			netnsFD, workloadPID,
+		netnsFD, err := unix.Open("/proc/self/ns/net", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "--[?] Failed to open netns fd: %v\n", err)
+			unix.Close(usernsFD)
+			return
+		}
+
+		fmt.Printf(
+			"--[>] Init: Sending workload PID=%d userns fd=%d netns fd=%d to supervisor\n",
+			workloadPID, usernsFD, netnsFD,
 		)
-		SendWorkloadPIDAndNetNS(ctx, workloadPID, netnsFD)
+
+		if err := SendWorkPIDUserNetNS(ipc, workloadPID, usernsFD, netnsFD); err != nil {
+			fmt.Fprintf(os.Stderr, "--[?] Failed to send workload PID + namespace fds: %v\n", err)
+		}
+
+		unix.Close(usernsFD)
+		unix.Close(netnsFD)
 	} else {
 		// joining container
 		fmt.Printf("--[>] Init: Sending workload PID=%d to supervisor\n", workloadPID)
-		SendWorkloadPID(ctx, workloadPID)
+		SendWorkloadPID(ipc, workloadPID)
 	}
-
 
 	var status unix.WaitStatus
 	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)
@@ -108,11 +123,11 @@ func runWorkload(profile Profile) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "---[?] Exec failed for %s: %v\n", spec.Path, err)
 			os.Exit(1)
-		}
+		}		
 	} else {
 		fmt.Fprintln(os.Stderr, "---[?] No workload spec found for this profile")
 		os.Exit(1)
-	}
+	}	
 
 	// unreachable
 	unix.Exit(0)
