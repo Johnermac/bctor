@@ -136,6 +136,22 @@ PID
 
 in progress
 
+```
+ |  the goal here is to be able to control multiple containers
+ |  not only exec, but inter-connect them in the same namespaces
+ |  we let all managament centralized in the supervisor (parent)
+ |  to connect in a namespace, we need to connect to the same user NS first
+ |  And for that, we need to send info from a container to another
+ |  but its not so easy, they are difference processes that close when their job is finished
+ |  the shared conn of NS can't depend on the availability of containers
+ |  the supervisor must decide when any resource closes, independently from containers. 
+ |  After the supervisor is in control, we have to send info and the lifecycle of the FD (file descriptors) is like that
+ |  container-init-1 (creator) -> supervisor -> container-init-2 (joiner)
+ |  the 1st creates namespaces, the 2nd joins them, but that dinamic must go through supervisor. WHY?
+ |  cause sometimes the child needs approval to continue to something, but that approval has a right time for it to happen.
+ |  the correct sequence of actions here I think its the most important thing for the whole process to work and not break
+ └─ MORE
+```
 
 --- todo ---
 

@@ -8,48 +8,30 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type PIDRole int
-
-const (
-	PIDRoleContinue PIDRole = iota // normal path
-	PIDRoleInit                    // PID 1 in new namespace
-	PIDRoleExit                    // child
-)
-
 type NamespaceConfig struct {
-	UTS    bool
-	MOUNT  bool
-	PID    bool
-	NET    bool
-	USER   bool
-	IPC    bool
-	CGROUP bool
+	USER 		bool
+	NET 		bool
+	MOUNT 	bool
+	PID   	bool
+	IPC   	bool
+	UTS   	bool
+	CGROUP 	bool
 }
+	
 
 func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 	var flags int
-	var userfd, netfd int
+	shared := make(map[NamespaceType]int)
 
-	sharingUser := spec.ShareUserNS != nil
-	sharingNet := spec.ShareNetNS != nil
-	creatingUser := spec.Namespaces.USER && !sharingUser
-
-	if sharingUser || sharingNet {
-		fmt.Printf("--[>] Init: RecvUserNetNSFD\n")
-		userfd, netfd = RecvUserNetNSFD(ipc)
-		fmt.Printf("--[>] Init: UserFD=%d and NetFD=%d\n", userfd, netfd)
-		unix.Close(ipc.Sup2Init[0])
+	// 0. Receive shared namespace FDs (if any)
+	if len(spec.Shares) > 0 {
+		shared = RecvNamespaceFDs(ipc)
 	}
 
-	// ---- USER namespace ----
-	if sharingUser {
-		fmt.Printf("--[>] Init: Joining shared userns fd=%d\n", userfd)
-		spec.ShareUserNS.FD = userfd
-		if err := unix.Setns(spec.ShareUserNS.FD, unix.CLONE_NEWUSER); err != nil {
-			return fmt.Errorf("setns(user): %w", err)
-		}
-		unix.Close(userfd)
-	} else if creatingUser {
+	// 1. USER namespace FIRST (special case)
+	_, joiningUser := shared[NSUser]
+
+	if spec.Namespaces.USER && !joiningUser {
 		fmt.Printf("--[>] Init: Creating new userns\n")
 		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
 			return fmt.Errorf("unshare(user): %w", err)
@@ -61,46 +43,48 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 
 		// Wait for uid/gid maps
 		fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
-		if err := WaitForUserNSSetup(ipc.UserNSPipe[0]); err != nil {
+		if err := WaitForUserNSSetup(ipc); err != nil {
 			return fmt.Errorf("--[?] wait user ns setup failed: %w", err)
 		}
 		unix.Close(ipc.UserNSPipe[0])
 		unix.Close(ipc.UserNSPipe[1])
 
-	}
-
-	// ---- NET namespace ----
-	if sharingNet {
-		fmt.Printf("--[>] Init: Joining shared netns fd=%d\n", netfd)
-		spec.ShareNetNS.FD = netfd
-		if err := joinNetNS(spec.ShareNetNS.FD); err != nil {
-			return fmt.Errorf("setns(net): %w", err)
+	} else if joiningUser {
+		fmt.Printf("--[>] Init: Joining shared userns=%d\n", shared[NSUser])
+		if err := unix.Setns(shared[NSUser], unix.CLONE_NEWUSER); err != nil {		
+			return fmt.Errorf("setns(user): %w", err)
 		}
-		unix.Close(netfd)
-	} else if spec.Namespaces.NET {
-		fmt.Printf("--[>] Init: Creating new netns\n")
-		flags |= unix.CLONE_NEWNET
+		unix.Close(shared[NSUser])
 	}
 
-	if spec.Namespaces.UTS {
-		flags |= unix.CLONE_NEWUTS
-	}
-	if spec.Namespaces.MOUNT {
-		flags |= unix.CLONE_NEWNS
-	}
-	if spec.Namespaces.PID {
-		flags |= unix.CLONE_NEWPID
-	}
-	if spec.Namespaces.IPC {
-		flags |= unix.CLONE_NEWIPC
+	// 2. Join shared namespaces (after USER exists)
+	for ns, fd := range shared {
+		if ns == NSUser {
+			continue // already handled
+		}
+		if err := unix.Setns(fd, nsTypeToCloneFlag(ns)); err != nil {
+			return fmt.Errorf("setns(%v): %w", ns, err)
+		}
+		unix.Close(fd)
 	}
 
-	if flags == 0 {
-		return nil
+	// 3. Build unshare flags for non-shared namespaces
+	for _, ns := range []NamespaceType{
+		NSNet, NSMnt, NSPID, NSIPC, NSUTS, NSCgroup,
+	} {		
+		if specWantsNamespace(spec, ns) {
+			if _, joined := shared[ns]; !joined {
+				flags |= nsTypeToCloneFlag(ns)
+			}
+		}
 	}
 
-	if err := unix.Unshare(flags); err != nil {
-		return fmt.Errorf("--[?] unshare failed: %v", err)
+	// 4. Unshare remaining namespaces
+	if flags != 0 {
+		fmt.Printf("--[>] Init: Unsharing namespaces with flags: %x\n", flags)
+		if err := unix.Unshare(flags); err != nil {
+			return fmt.Errorf("unshare: %w", err)
+		}
 	}
 
 	if err := flagsChecks(spec); err != nil {
@@ -109,6 +93,7 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 
 	return nil
 }
+
 
 func flagsChecks(spec *ContainerSpec) error {
 	if spec.Namespaces.MOUNT {
@@ -147,14 +132,6 @@ func flagsChecks(spec *ContainerSpec) error {
 	return nil
 }
 
-func NewFork() (uintptr, error) {
-	pid, _, err := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
-	if err != 0 {
-		return 0, err
-	}
-	return pid, nil
-}
-
 func (c NamespaceConfig) AnyEnabled() bool {
 	return c.USER || c.MOUNT || c.CGROUP || c.PID || c.UTS || c.NET || c.IPC
 }
@@ -163,4 +140,67 @@ func LogNamespace(parentNS *NamespaceState, pid int) {
 	childNS, _ := ReadNamespaces(pid)
 	nsdiff := DiffNamespaces(parentNS, childNS)
 	LogNamespaceDelta(nsdiff)
+}
+
+func nsTypeToCloneFlag(t NamespaceType) int {
+	switch t {
+	case NSUser:
+		return unix.CLONE_NEWUSER
+	case NSNet:
+		return unix.CLONE_NEWNET
+	case NSMnt:
+		return unix.CLONE_NEWNS
+	case NSPID:
+		return unix.CLONE_NEWPID
+	case NSIPC:
+		return unix.CLONE_NEWIPC
+	case NSUTS:
+		return unix.CLONE_NEWUTS
+	case NSCgroup:
+		return unix.CLONE_NEWCGROUP
+	default:
+		panic("unknown ns type")
+	}
+}
+
+func specWantsNamespace(spec *ContainerSpec, ns NamespaceType) bool {
+	switch ns {
+	case NSUser:
+		return spec.Namespaces.USER
+	case NSNet:
+		return spec.Namespaces.NET
+	case NSMnt:
+		return spec.Namespaces.MOUNT
+	case NSPID:
+		return spec.Namespaces.PID
+	case NSIPC:
+		return spec.Namespaces.IPC
+	case NSUTS:
+		return spec.Namespaces.UTS
+	case NSCgroup:
+		return spec.Namespaces.CGROUP
+	default:
+		return false
+	}
+}
+
+func nsTypeToProcPath(ns NamespaceType) string {
+	switch ns {
+	case NSUser:
+		return "/proc/self/ns/user"
+	case NSNet:
+		return "/proc/self/ns/net"
+	case NSMnt:
+		return "/proc/self/ns/mnt"
+	case NSPID:
+		return "/proc/self/ns/pid"
+	case NSIPC:
+		return "/proc/self/ns/ipc"
+	case NSUTS:
+		return "/proc/self/ns/uts"
+	case NSCgroup:
+		return "/proc/self/ns/cgroup"
+	default:
+		panic("unknown namespace type")
+	}
 }

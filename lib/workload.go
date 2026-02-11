@@ -49,38 +49,17 @@ func SetupRootAndSpawnWorkload(
 }
 
 func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
-	if spec.Namespaces.NET {
-		// creator container
+	// 1. Always send workload PID
+	SendWorkloadPID(ipc, workloadPID)
 
-		usernsFD, err := unix.Open("/proc/self/ns/user", unix.O_RDONLY|unix.O_CLOEXEC, 0)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "--[?] Failed to open userns fd: %v\n", err)
-			return
-		}
-
-		netnsFD, err := unix.Open("/proc/self/ns/net", unix.O_RDONLY|unix.O_CLOEXEC, 0)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "--[?] Failed to open netns fd: %v\n", err)
-			unix.Close(usernsFD)
-			return
-		}
-
-		fmt.Printf(
-			"--[>] Init: Sending workload PID=%d userns fd=%d netns fd=%d to supervisor\n",
-			workloadPID, usernsFD, netnsFD,
-		)
-
-		if err := SendWorkPIDUserNetNS(ipc, workloadPID, usernsFD, netnsFD); err != nil {
-			fmt.Fprintf(os.Stderr, "--[?] Failed to send workload PID + namespace fds: %v\n", err)
-		}
-
-		unix.Close(usernsFD)
-		unix.Close(netnsFD)
-	} else {
-		// joining container
-		fmt.Printf("--[>] Init: Sending workload PID=%d to supervisor\n", workloadPID)
-		SendWorkloadPID(ipc, workloadPID)
+	// 2. Collect namespace FDs this container CREATED
+	handles := CollectCreatedNamespaceFDs(spec)
+	if len(handles) == 0 {
+		return
 	}
+
+	// 3. Send namespace handles to supervisor
+	SendCreatedNamespaceFDs(ipc, handles)
 
 	var status unix.WaitStatus
 	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)

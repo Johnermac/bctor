@@ -7,34 +7,52 @@ import (
 )
 
 type ContainerSpec struct {
-	ID           string
-	Namespaces   NamespaceConfig
+	ID           string	
+	
 	FS           FSConfig
 	Capabilities CapsConfig
 	Cgroups      CGroupsConfig // nil = disabled
 	Seccomp      Profile
-	Workload     WorkloadSpec
-	ShareNetNS   *NetNamespace
-	ShareUserNS  *UserNamespace
+	Workload     WorkloadSpec	
+
+	Namespaces NamespaceConfig // what this container wants to CREATE
+	Shares     []ShareSpec     // what this container wants to JOIN
+	
 }
 
 type SupervisorCtx struct {
-	ParentNS *NamespaceState
-	UserNS   *UserNamespace
-	NetNS    *NetNamespace // pointer to owned netns
+	ParentNS *NamespaceState	
+	Handles map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
+	
 	ChildPID uintptr       // init pid
-	WorkPID  uintptr       // workload pid
+	WorkPID  uintptr       // workload pid	
 }
 
-type NetNamespace struct {
-	FD  int // open netns fd (O_PATH)
-	Ref int
+// namespaces
+
+type NamespaceType int
+
+const (
+	NSUser NamespaceType = iota
+	NSNet
+	NSMnt
+	NSPID
+	NSIPC
+	NSUTS
+	NSCgroup
+)
+
+type ShareSpec struct {
+	Type          NamespaceType
+	FromContainer string // container ID
 }
 
-type UserNamespace struct {
-	FD  int // open /proc/<pid>/ns/user (O_PATH)
-	Ref int
+type NamespaceHandle struct {
+	Type NamespaceType
+	FD   int // O_PATH fd received or captured
+	Ref  int // supervisor-owned refcount
 }
+
 
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)

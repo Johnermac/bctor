@@ -36,3 +36,11 @@ func NewIPC() (*IPC, error) {
 
 	return &c, nil
 }
+
+func NewFork() (uintptr, error) {
+	pid, _, err := unix.RawSyscall(unix.SYS_FORK, 0, 0, 0)
+	if err != 0 {
+		return 0, err
+	}
+	return pid, nil
+}

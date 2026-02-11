@@ -10,7 +10,7 @@ import (
 )
 
 func RunContainerInit(
-	scx lib.SupervisorCtx,
+	scx *lib.SupervisorCtx,
 	spec *lib.ContainerSpec,
 	ipc *lib.IPC) {
 
@@ -19,11 +19,8 @@ func RunContainerInit(
 
 	os.Stdout.WriteString("--[*] Init: Start to Apply Namespaces\n")
 	if err := lib.ApplyNamespaces(spec, ipc); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Init: Failed to apply namespaces: %v\n", err)
-		if spec.ShareNetNS != nil {
-			fmt.Fprintf(os.Stderr, "   → joining shared netns FD=%d\n", spec.ShareNetNS.FD)
-		}
-		fmt.Fprintf(os.Stderr, "   → full spec: %+v\n", spec.Namespaces)
+		fmt.Fprintf(os.Stderr, "--[?] Init: Failed to apply namespaces: %v\n", err)		
+		fmt.Fprintf(os.Stderr, "--[!] Init: full spec: %+v\n", spec.Namespaces)
 		os.Exit(1)
 	}
 

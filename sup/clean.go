@@ -3,22 +3,23 @@ package sup
 import (
 	"fmt"
 
+	"github.com/Johnermac/bctor/lib"
 	"golang.org/x/sys/unix"
 )
 
-func SupervisorLoop(containers map[string]*Container, events <-chan Event) {
-
+func OnContainerExit(
+	containers map[string]*Container,
+	scx *lib.SupervisorCtx,
+	events <-chan Event,
+) {
 	fmt.Println("[!] Supervisor running")
-	fmt.Printf("[DBG] Supervisor: Len of containers: %d\n", len(containers))
 
 	for {
 		ev, ok := <-events
 		if !ok {
-			fmt.Printf("[*] Supervisor: Events channel closed\n")
+			fmt.Println("[*] Supervisor: Events channel closed")
 			return
 		}
-
-		fmt.Printf("[DBG] Supervisor: event type: %d\n", ev.Type)
 
 		switch ev.Type {
 
@@ -30,39 +31,35 @@ func SupervisorLoop(containers map[string]*Container, events <-chan Event) {
 			}
 
 		case EventChildExit:
-			fmt.Printf("[DBG] Supervisor: Got exit: PID=%d\n", ev.PID)
-
 			c := findContainerByPID(containers, ev.PID)
 			if c == nil {
-				fmt.Println("[DBG] Supervisor: unknown PID")
 				continue
 			}
 
-			fmt.Printf(
-				"[DBG] Supervisor: container match: InitPID=%d WorkloadPID=%d\n",
-				c.InitPID, c.WorkloadPID,
-			)
-
-			// workload exit: do nothing (init handles lifecycle)
+			// workload exit → ignore (init owns lifecycle)
 			if ev.PID == c.WorkloadPID {
 				continue
 			}
 
-			// init exit: container teardown
+			// init exit → teardown
 			if ev.PID == c.InitPID {
-				fmt.Printf("[DBG] Supervisor: Container %s exited\n", c.Spec.ID)
+				c.State = ContainerExited
 
-				if c.NetNS != nil {
-					c.NetNS.Ref--
-					if c.NetNS.Ref == 0 {
-						fmt.Printf("[DBG] Supervisor: Cleaning up netns fd %d\n", c.NetNS.FD)
-						unix.Close(c.NetNS.FD)
+				// cleanup ONLY namespaces owned by this container
+				if owned, ok := scx.Handles[c.Spec.ID]; ok {
+					for ns, h := range owned {
+						h.Ref--
+						if h.Ref == 0 {
+							unix.Close(h.FD)
+							delete(owned, ns)
+						}
 					}
+					delete(scx.Handles, c.Spec.ID)
 				}
 
-				c.State = ContainerExited
 				delete(containers, c.Spec.ID)
 			}
 		}
 	}
 }
+

@@ -13,47 +13,100 @@ func joinNetNS(fd int) error {
 	return unix.Setns(fd, unix.CLONE_NEWNET)
 }
 
-// Init (creator) → Supervisor: send workload PID + userns FD + netns FD
-func SendWorkPIDUserNetNS(ipc *IPC, pid int, usernsFD int, netnsFD int) error {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(pid))
+// Collect created namespace FDs from init to send to supervisor
+func CollectCreatedNamespaceFDs(spec *ContainerSpec) map[NamespaceType]int {
+	fds := make(map[NamespaceType]int)
 
-	// send BOTH FDs in one SCM_RIGHTS message
-	oob := unix.UnixRights(usernsFD, netnsFD)
+	joined := make(map[NamespaceType]bool)
+	for _, s := range spec.Shares {
+		joined[s.Type] = true
+	}
 
-	return unix.Sendmsg(ipc.Init2Sup[1], buf, oob, nil, 0)
+	for _, ns := range []NamespaceType{
+		NSUser, NSNet, NSMnt, NSPID, NSIPC, NSUTS, NSCgroup,
+	} {
+		if !specWantsNamespace(spec, ns) {
+			continue
+		}
+		if joined[ns] {
+			continue
+		}
+
+		path := nsTypeToProcPath(ns)
+		fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			continue
+		}
+		fds[ns] = fd
+	}
+
+	return fds
 }
 
-// Supervisor (creator) → receive workload PID + userns FD + netns FD
-func RecvWorkPIDUserNetNS(ipc *IPC) (pid int, usernsFD int, netnsFD int) {
-	buf := make([]byte, 4)
-	oob := make([]byte, unix.CmsgSpace(2*4)) // space for 2 FDs
+// Send created namespace FDs from init to supervisor
+func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
+	count := len(fds)
+	if count == 0 {
+		return nil
+	}
+
+	buf := make([]byte, 1+count)
+	buf[0] = byte(count)
+
+	oobfds := make([]int, 0, count)
+
+	i := 0
+	for ns, fd := range fds {
+		buf[1+i] = byte(ns)
+		oobfds = append(oobfds, fd)
+		i++
+	}
+
+	oob := unix.UnixRights(oobfds...)
+	return unix.Sendmsg(ipc.Init2Sup[1], buf, oob, nil, 0)
+}
+// Supervisor receives created namespace FDs from init
+func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
+	buf := make([]byte, 256)
+	oob := make([]byte, unix.CmsgSpace(8*8))
 
 	n, oobn, _, _, err := unix.Recvmsg(ipc.Init2Sup[0], buf, oob, 0)
 	if err != nil {
-		panic(err)
-	}
-	if n != 4 {
-		panic("invalid workload PID message size")
+		return nil, err
 	}
 
-	pid = int(binary.LittleEndian.Uint32(buf))
+	if n == 0 {
+		return nil, nil
+	}
+
+	count := int(buf[0])
+	if count == 0 {
+		return nil, nil
+	}
 
 	cmsgs, err := unix.ParseSocketControlMessage(oob[:oobn])
-	if err != nil || len(cmsgs) != 1 {
-		panic("invalid SCM_RIGHTS message")
+	if err != nil {
+		return nil, err
 	}
 
 	fds, err := unix.ParseUnixRights(&cmsgs[0])
-	if err != nil || len(fds) != 2 {
-		panic("expected exactly 2 FDs (userns, netns)")
+	if err != nil {
+		return nil, err
 	}
 
-	usernsFD = fds[0]
-	netnsFD = fds[1]
+	if len(fds) != count {
+		return nil, fmt.Errorf("fd count mismatch")
+	}
 
-	return
+	out := make(map[NamespaceType]int)
+	for i := 0; i < count; i++ {
+		ns := NamespaceType(buf[1+i])
+		out[ns] = fds[i]
+	}
+
+	return out, nil
 }
+
 
 // Joining container → Supervisor: send workload PID only
 func SendWorkloadPID(ipc *IPC, pid int) error {
@@ -77,13 +130,66 @@ func RecvWorkloadPID(ipc *IPC) int {
 	return int(binary.LittleEndian.Uint32(buf))
 }
 
-// Supervisor → joiner init: send userns + netns
+// OLD > Supervisor → joiner init: send userns + netns
 func SendUserNetNSFD(ipc *IPC, usernsFD int, netnsFD int) error {
 	oob := unix.UnixRights(usernsFD, netnsFD)
 	return unix.Sendmsg(ipc.Sup2Init[1], nil, oob, nil, 0)
 }
 
-// Joiner init ← Supervisor: receive userns + netns
+// NEW > Supervisor → joiner init: send N FDs + types
+func SendNamespaceFDs(
+	ipc *IPC,
+	handles map[NamespaceType]*NamespaceHandle,
+	shares []ShareSpec,
+) error {
+
+	count := len(shares)
+	if count == 0 {
+		return nil
+	}
+
+	// ---- in-band payload ----
+	buf := make([]byte, 1+count)
+	buf[0] = byte(count)
+
+	fds := make([]int, 0, count)
+
+	for i, s := range shares {
+		h, ok := handles[s.Type]
+		if !ok {
+			return fmt.Errorf("missing namespace handle: %v", s.Type)
+		}
+		buf[1+i] = byte(s.Type)
+		fds = append(fds, h.FD)
+		h.Ref++
+	}
+
+	// ---- out-of-band ----
+	oob := unix.UnixRights(fds...)	
+	return unix.Sendmsg(ipc.Sup2Init[1], buf, oob, nil,	0)
+}
+
+// Supervisor registers namespace handles for a container (for future sharing)
+func RegisterNamespaceHandles(
+	scx *SupervisorCtx,
+	containerID string,
+	fds map[NamespaceType]int,
+) {
+	if scx.Handles[containerID] == nil {
+		scx.Handles[containerID] = make(map[NamespaceType]*NamespaceHandle)
+	}
+
+	for ns, fd := range fds {
+		scx.Handles[containerID][ns] = &NamespaceHandle{
+			FD:  fd,
+			Ref: 1,
+		}
+	}
+}
+
+
+
+// OLD > Joiner init ← Supervisor: receive userns + netns
 func RecvUserNetNSFD(ipc *IPC) (int, int) {
 	oob := make([]byte, unix.CmsgSpace(8))
 	_, oobn, _, _, err := unix.Recvmsg(ipc.Sup2Init[0], nil, oob, 0)
@@ -96,34 +202,64 @@ func RecvUserNetNSFD(ipc *IPC) (int, int) {
 	return fds[0], fds[1]
 }
 
+// NEW > Joiner init ← Supervisor: receive N FDs + types
+func RecvNamespaceFDs(ipc *IPC) map[NamespaceType]int {
+	// max: count(1) + N types
+	buf := make([]byte, 32)
+
+	oob := make([]byte, unix.CmsgSpace(8*8)) // up to 8 FDs
+	_, oobn, _, _, err := unix.Recvmsg(ipc.Sup2Init[0], buf, oob, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	count := int(buf[0])
+	types := buf[1 : 1+count]
+
+	cmsgs, _ := unix.ParseSocketControlMessage(oob[:oobn])
+	fds, _ := unix.ParseUnixRights(&cmsgs[0])
+
+	if len(fds) != count {
+		panic("fd/type count mismatch")
+	}
+
+	out := make(map[NamespaceType]int, count)
+	for i := 0; i < count; i++ {
+		out[NamespaceType(types[i])] = fds[i]
+	}
+
+	return out
+}
+
+
 // Wait for the supervisor to signal that USER namespace setup is complete
-func WaitForUserNSSetup(syncFD int) error {
+func WaitForUserNSSetup(ipc *IPC) error {
 	var buf [1]byte
-	_, err := unix.Read(syncFD, buf[:])
+	_, err := unix.Read(ipc.UserNSPipe[0], buf[:])
 	return err
 }
 
-func SetupUserNSAndContinue(pid int, syncFD int) error {
+func SetupUserNSAndContinue(pid int, ipc *IPC) error {
 	pidStr := strconv.Itoa(pid)
 
 	if err := denySetgroups(pidStr); err != nil {
 		fmt.Fprintf(os.Stderr, "--[?] Failed to deny setgroups for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("--[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
+	fmt.Printf("[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
 
 	if err := writeUIDMap(pidStr); err != nil {
 		fmt.Fprintf(os.Stderr, "--[?] Failed to write UID map for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("--[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
+	fmt.Printf("[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
 
 	if err := writeGIDMap(pidStr); err != nil {
 		fmt.Fprintf(os.Stderr, "--[?] Failed to write GID map for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("--[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
+	fmt.Printf("[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
 
-	_, err := unix.Write(syncFD, []byte{1})
+	_, err := unix.Write(ipc.UserNSPipe[1], []byte{1})
 	return err
 }
