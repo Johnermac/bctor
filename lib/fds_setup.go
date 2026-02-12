@@ -3,15 +3,9 @@ package lib
 import (
 	"encoding/binary"
 	"fmt"
-	"os"
-	"strconv"
 
 	"golang.org/x/sys/unix"
 )
-
-func joinNetNS(fd int) error {
-	return unix.Setns(fd, unix.CLONE_NEWNET)
-}
 
 // Collect created namespace FDs from init to send to supervisor
 func CollectCreatedNamespaceFDs(spec *ContainerSpec) map[NamespaceType]int {
@@ -107,7 +101,6 @@ func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
 	return out, nil
 }
 
-
 // Joining container → Supervisor: send workload PID only
 func SendWorkloadPID(ipc *IPC, pid int) error {
 	buf := make([]byte, 4)
@@ -128,12 +121,6 @@ func RecvWorkloadPID(ipc *IPC) int {
 	}
 
 	return int(binary.LittleEndian.Uint32(buf))
-}
-
-// OLD > Supervisor → joiner init: send userns + netns
-func SendUserNetNSFD(ipc *IPC, usernsFD int, netnsFD int) error {
-	oob := unix.UnixRights(usernsFD, netnsFD)
-	return unix.Sendmsg(ipc.Sup2Init[1], nil, oob, nil, 0)
 }
 
 // NEW > Supervisor → joiner init: send N FDs + types
@@ -169,39 +156,6 @@ func SendNamespaceFDs(
 	return unix.Sendmsg(ipc.Sup2Init[1], buf, oob, nil,	0)
 }
 
-// Supervisor registers namespace handles for a container (for future sharing)
-func RegisterNamespaceHandles(
-	scx *SupervisorCtx,
-	containerID string,
-	fds map[NamespaceType]int,
-) {
-	if scx.Handles[containerID] == nil {
-		scx.Handles[containerID] = make(map[NamespaceType]*NamespaceHandle)
-	}
-
-	for ns, fd := range fds {
-		scx.Handles[containerID][ns] = &NamespaceHandle{
-			FD:  fd,
-			Ref: 1,
-		}
-	}
-}
-
-
-
-// OLD > Joiner init ← Supervisor: receive userns + netns
-func RecvUserNetNSFD(ipc *IPC) (int, int) {
-	oob := make([]byte, unix.CmsgSpace(8))
-	_, oobn, _, _, err := unix.Recvmsg(ipc.Sup2Init[0], nil, oob, 0)
-	if err != nil {
-		panic(err)
-	}
-	cmsgs, _ := unix.ParseSocketControlMessage(oob[:oobn])
-	fds, _ := unix.ParseUnixRights(&cmsgs[0])
-
-	return fds[0], fds[1]
-}
-
 // NEW > Joiner init ← Supervisor: receive N FDs + types
 func RecvNamespaceFDs(ipc *IPC) map[NamespaceType]int {
 	// max: count(1) + N types
@@ -231,35 +185,20 @@ func RecvNamespaceFDs(ipc *IPC) map[NamespaceType]int {
 	return out
 }
 
-
-// Wait for the supervisor to signal that USER namespace setup is complete
-func WaitForUserNSSetup(ipc *IPC) error {
-	var buf [1]byte
-	_, err := unix.Read(ipc.UserNSPipe[0], buf[:])
-	return err
-}
-
-func SetupUserNSAndContinue(pid int, ipc *IPC) error {
-	pidStr := strconv.Itoa(pid)
-
-	if err := denySetgroups(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to deny setgroups for PID %s: %v\n", pidStr, err)
-		return err
+// Supervisor registers namespace handles for a container (for future sharing)
+func RegisterNamespaceHandles(
+	scx *SupervisorCtx,
+	containerID string,
+	fds map[NamespaceType]int,
+) {
+	if scx.Handles[containerID] == nil {
+		scx.Handles[containerID] = make(map[NamespaceType]*NamespaceHandle)
 	}
-	fmt.Printf("[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
 
-	if err := writeUIDMap(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to write UID map for PID %s: %v\n", pidStr, err)
-		return err
+	for ns, fd := range fds {
+		scx.Handles[containerID][ns] = &NamespaceHandle{
+			FD:  fd,
+			Ref: 1,
+		}
 	}
-	fmt.Printf("[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
-
-	if err := writeGIDMap(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to write GID map for PID %s: %v\n", pidStr, err)
-		return err
-	}
-	fmt.Printf("[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
-
-	_, err := unix.Write(ipc.UserNSPipe[1], []byte{1})
-	return err
 }

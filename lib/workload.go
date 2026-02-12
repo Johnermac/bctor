@@ -13,7 +13,7 @@ func SetupRootAndSpawnWorkload(
 	pid uintptr,
 	ipc *IPC) {
 
-	if pid == 0 {
+	if pid == 0 {	
 
 		if spec.Namespaces.MOUNT {
 			fmt.Println("---[*] Workload: File System Setup")
@@ -28,7 +28,14 @@ func SetupRootAndSpawnWorkload(
 		err := ApplySeccomp(profile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
-		}*/
+		}*/		
+
+		fmt.Println("PAUSE NETWORK")
+		buf := make([]byte, 1)
+		unix.Read(ipc.NetReady[0], buf)
+		unix.Close(ipc.NetReady[0])
+		
+		
 
 		fmt.Println("---[*] Workload: Run Workload")
 		runWorkload(profile)
@@ -37,7 +44,8 @@ func SetupRootAndSpawnWorkload(
 		fmt.Fprintln(os.Stderr, "---[?] Workload: Returned unexpectedly")
 		unix.Exit(127)
 
-	} else {
+	} else {		
+
 		fmt.Printf("--[!] Init: Second fork done\n")
 		fmt.Printf(
 			"--[DBG] Init: container-init: PID=%d waiting for child PID=%d\n",
@@ -50,7 +58,7 @@ func SetupRootAndSpawnWorkload(
 
 func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	// 1. Always send workload PID
-	SendWorkloadPID(ipc, workloadPID)
+	SendWorkloadPID(ipc, workloadPID)	
 
 	// 2. Collect namespace FDs this container CREATED
 	handles := CollectCreatedNamespaceFDs(spec)
@@ -59,7 +67,7 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	}
 
 	// 3. Send namespace handles to supervisor
-	SendCreatedNamespaceFDs(ipc, handles)
+	SendCreatedNamespaceFDs(ipc, handles)	
 
 	var status unix.WaitStatus
 	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)
@@ -86,6 +94,9 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 }
 
 func runWorkload(profile Profile) {
+
+	//os.Stdout.Sync()
+  //os.Stderr.Sync()
 
 	if profile == ProfileHello {
 		syscall.Write(1, []byte("\n---[!] EXEC: Hello Seccomp!\n"))

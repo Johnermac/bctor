@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/Johnermac/bctor/lib"
+	"github.com/Johnermac/bctor/lib/ntw"
 	"golang.org/x/sys/unix"
 )
 
@@ -25,7 +26,8 @@ type Container struct {
 	InitPID     int
 	WorkloadPID int
 	State       ContainerState	
-	Namespaces map[lib.NamespaceType]*lib.NamespaceHandle	
+	Namespaces 	map[lib.NamespaceType]*lib.NamespaceHandle	
+	Net 				*ntw.NetResources
 }
 
 func StartContainer(
@@ -112,9 +114,23 @@ func FinalizeContainer(
 			created = fds
 		}
 	}
-	unix.Close(ipc.Init2Sup[0])
-	unix.Close(ipc.Sup2Init[0])
-	
+
+	var netres *ntw.NetResources
+
+	if fd, ok := created[lib.NSNet]; ok && fd != 0 {
+		netres = ntw.NetworkConfig(fd, scx, spec, created)
+		if netres == nil {
+				lib.LogError("Supervisor: Network setup failed for %s. Cleanup might be needed.", spec.ID)
+		}
+  }		
+
+	if netres != nil {
+		lib.LogInfo("UNPAUSED")
+    unix.Write(ipc.NetReady[1], []byte{1})
+	} else {
+			lib.LogError("Network failed, container will stay frozen or exit")
+	}
+
 	fmt.Printf("[>] Supervisor: Container %s created workload PID=%d\n", spec.ID, workloadPID)
 	
 	handles := make(map[lib.NamespaceType]*lib.NamespaceHandle)
@@ -132,9 +148,13 @@ func FinalizeContainer(
 		WorkloadPID: workloadPID,
 		State:       ContainerRunning,
 		Namespaces:  handles,
+		Net: 				 netres,
 	}	
 
-	containers[spec.ID] = c
+	unix.Close(ipc.Init2Sup[0])
+	unix.Close(ipc.Sup2Init[0])	
+
+	lib.LogInfo("Container %s finalized (PID: %d)", spec.ID, workloadPID)	
 	return c
 }
 

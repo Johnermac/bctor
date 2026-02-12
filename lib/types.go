@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"net"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -20,13 +21,21 @@ type ContainerSpec struct {
 	
 }
 
-type SupervisorCtx struct {
-	ParentNS *NamespaceState	
-	Handles map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
-	
-	ChildPID uintptr       // init pid
-	WorkPID  uintptr       // workload pid	
+type IPManager interface {
+	Allocate() (net.IP, error)
+	Release(net.IP)
 }
+
+type SupervisorCtx struct {
+	ParentNS 	*NamespaceState	
+	Handles 	map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
+	IPAlloc   IPManager
+	ChildPID 	uintptr       // init pid
+	WorkPID  	uintptr       // workload pid	
+	Subnet  	*net.IPNet
+}
+
+
 
 // namespaces
 
@@ -73,7 +82,7 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 	},
 	ProfileIpLink: {
 		Path: "/bin/ip",
-		Args: []string{"ip", "link", "show"},
+		Args: []string{"ip", "addr", "show"},
 		Env:  os.Environ(),
 	},
 }
@@ -86,7 +95,7 @@ func DefaultShellSpec() *ContainerSpec {
 		CGROUP: false, //needs root cause /sys/fs/cgroup
 		PID:    false,
 		UTS:    false,
-		NET:    false, // set to true for container 1, container 2 will join this netns
+		NET:    true, // set to true for container 1, container 2 will join this netns
 		IPC:    false,
 	}
 

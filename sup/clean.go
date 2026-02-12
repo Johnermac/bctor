@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Johnermac/bctor/lib"
+	"github.com/Johnermac/bctor/lib/ntw"
 	"golang.org/x/sys/unix"
 )
 
@@ -11,6 +12,7 @@ func OnContainerExit(
 	containers map[string]*Container,
 	scx *lib.SupervisorCtx,
 	events <-chan Event,
+	iface string,
 ) {
 	fmt.Println("[!] Supervisor running")
 
@@ -45,20 +47,30 @@ func OnContainerExit(
 			if ev.PID == c.InitPID {
 				c.State = ContainerExited
 
+				if c.Net != nil {
+					ntw.CleanupContainerNetworking(scx, c.Net)
+				}
+
 				// cleanup ONLY namespaces owned by this container
 				if owned, ok := scx.Handles[c.Spec.ID]; ok {
 					for ns, h := range owned {
 						h.Ref--
 						if h.Ref == 0 {
 							unix.Close(h.FD)
-							delete(owned, ns)
+							delete(owned, ns)							
 						}
 					}
 					delete(scx.Handles, c.Spec.ID)
 				}
 
 				delete(containers, c.Spec.ID)
-			}
+
+				if len(containers) == 0 {
+					ntw.RemoveNATRule("10.0.0.0/24", iface)
+					ntw.DeleteBridge("bctor0")		
+					lib.LogSuccess("All good!")			
+				}
+			}			
 		}
 	}
 }

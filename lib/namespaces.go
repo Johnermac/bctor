@@ -3,8 +3,8 @@ package lib
 import (
 	"fmt"
 	"os"
+	"strconv"
 
-	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -103,31 +103,7 @@ func flagsChecks(spec *ContainerSpec) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	if spec.Namespaces.NET {
-
-		// Bring up loopback using netlink
-		lo, err := netlink.LinkByName("lo")
-		if err != nil {
-			return fmt.Errorf("--[?] Init: cannot find lo: %w", err)
-		}
-		if err := netlink.LinkSetUp(lo); err != nil {
-			return fmt.Errorf("--[?] Init: cannot bring up lo: %w", err)
-		}
-		// interfaces
-		links, _ := netlink.LinkList()
-		for _, l := range links {
-			fmt.Printf("--[*] Init: %v: %v\n", l.Attrs().Name, l.Attrs().Flags)
-		}
-
-	}
-
-	if spec.Namespaces.IPC {
-		// todo later some implmentation
-		// for now the ns-ipc works for poc
-
-	}
+	}	
 
 	return nil
 }
@@ -203,4 +179,36 @@ func nsTypeToProcPath(ns NamespaceType) string {
 	default:
 		panic("unknown namespace type")
 	}
+}
+
+// Wait for the supervisor to signal that USER namespace setup is complete
+func WaitForUserNSSetup(ipc *IPC) error {
+	var buf [1]byte
+	_, err := unix.Read(ipc.UserNSPipe[0], buf[:])
+	return err
+}
+
+func SetupUserNSAndContinue(pid int, ipc *IPC) error {
+	pidStr := strconv.Itoa(pid)
+
+	if err := denySetgroups(pidStr); err != nil {
+		fmt.Fprintf(os.Stderr, "--[?] Failed to deny setgroups for PID %s: %v\n", pidStr, err)
+		return err
+	}
+	fmt.Printf("[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
+
+	if err := writeUIDMap(pidStr); err != nil {
+		fmt.Fprintf(os.Stderr, "--[?] Failed to write UID map for PID %s: %v\n", pidStr, err)
+		return err
+	}
+	fmt.Printf("[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
+
+	if err := writeGIDMap(pidStr); err != nil {
+		fmt.Fprintf(os.Stderr, "--[?] Failed to write GID map for PID %s: %v\n", pidStr, err)
+		return err
+	}
+	fmt.Printf("[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
+
+	_, err := unix.Write(ipc.UserNSPipe[1], []byte{1})
+	return err
 }

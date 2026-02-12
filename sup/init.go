@@ -27,7 +27,7 @@ func RunContainerInit(
 	if spec.Namespaces.AnyEnabled() {
 		os.Stdout.WriteString("\n--[*] PARENT-CHILD\n")
 		lib.LogNamespace(scx.ParentNS, os.Getpid())
-	}
+	}	
 
 	// CONTROLS
 
