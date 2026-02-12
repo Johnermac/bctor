@@ -57,7 +57,7 @@ func OnContainerExit(
 						h.Ref--
 						if h.Ref == 0 {
 							unix.Close(h.FD)
-							delete(owned, ns)							
+							delete(owned, ns)
 						}
 					}
 					delete(scx.Handles, c.Spec.ID)
@@ -67,11 +67,10 @@ func OnContainerExit(
 
 				if len(containers) == 0 {
 					ntw.RemoveNATRule("10.0.0.0/24", iface)
-					ntw.DeleteBridge("bctor0")		
-					lib.LogSuccess("All good!")			
+					ntw.DeleteBridge("bctor0")
+					lib.LogSuccess("All good!")
 				}
-			}			
+			}
 		}
 	}
 }
-

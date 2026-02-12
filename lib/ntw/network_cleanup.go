@@ -31,8 +31,7 @@ func (a *IPAllocator) Release(ip net.IP) {
 	delete(a.Used, ip.String())
 }
 
-
-//optional
+// optional
 func DeleteBridge(name string) {
 	link, err := netlink.LinkByName(name)
 	if err == nil {

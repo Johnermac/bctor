@@ -16,7 +16,7 @@ const (
 )
 
 func LogInfo(format string, a ...interface{}) {
-	
+
 	prefix := fmt.Sprintf("%sINFO:%s ", Cyan, Reset)
 	fmt.Printf(prefix+format+"\n", a...)
 }

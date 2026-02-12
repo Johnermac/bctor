@@ -19,7 +19,7 @@ func RunContainerInit(
 
 	os.Stdout.WriteString("--[*] Init: Start to Apply Namespaces\n")
 	if err := lib.ApplyNamespaces(spec, ipc); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Init: Failed to apply namespaces: %v\n", err)		
+		fmt.Fprintf(os.Stderr, "--[?] Init: Failed to apply namespaces: %v\n", err)
 		fmt.Fprintf(os.Stderr, "--[!] Init: full spec: %+v\n", spec.Namespaces)
 		os.Exit(1)
 	}
@@ -27,7 +27,7 @@ func RunContainerInit(
 	if spec.Namespaces.AnyEnabled() {
 		os.Stdout.WriteString("\n--[*] PARENT-CHILD\n")
 		lib.LogNamespace(scx.ParentNS, os.Getpid())
-	}	
+	}
 
 	// CONTROLS
 

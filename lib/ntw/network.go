@@ -20,10 +20,10 @@ import (
 //network
 
 type NetResources struct {
-	Bridge     string
-	HostVeth   string
-	PeerVeth   string
-	IP         string
+	Bridge   string
+	HostVeth string
+	PeerVeth string
+	IP       string
 }
 
 type IPAllocator struct {
@@ -32,8 +32,6 @@ type IPAllocator struct {
 	Next   int
 	Used   map[string]bool
 }
-
-
 
 func EnsureBridge(name, cidr string) error {
 	br := &netlink.Bridge{
@@ -87,7 +85,6 @@ func DefaultRouteInterface() (string, error) {
 	return "", fmt.Errorf("no default route found")
 }
 
-
 func AddNATRule(subnet string, outIface string) error {
 	cmd := exec.Command(
 		"iptables",
@@ -137,18 +134,16 @@ func randomSuffix(n int) string {
 	return fmt.Sprintf("%x", b)
 }
 
-
-
 func SetupContainerVeth(
-	id string,         // ID do container para logs/identificação
+	id string, // ID do container para logs/identificação
 	bridgeName string,
-	netnsFD int,       // Use o INT do FD que veio do mapa 'created'
+	netnsFD int, // Use o INT do FD que veio do mapa 'created'
 	ip net.IP,
 ) (*NetResources, error) {
 
 	// 1. Nomes Únicos
-	suffix := randomSuffix(2) // 2 bytes = 4 chars hex. Ex: ve-abcd
-	hostVeth := fmt.Sprintf("ve-%s", suffix) 
+	suffix := randomSuffix(4) // 4 bytes = 8 chars hex. Ex: ve-abcdef
+	hostVeth := fmt.Sprintf("ve-%s", suffix)
 	tempPeer := fmt.Sprintf("vp-%s", suffix)
 
 	veth := &netlink.Veth{
@@ -205,16 +200,13 @@ func SetupContainerVeth(
 	return &NetResources{
 		Bridge:   bridgeName,
 		HostVeth: hostVeth,
-		PeerVeth: tempPeer, 
+		PeerVeth: tempPeer,
 		IP:       ip.String(),
 	}, nil
 }
 
-
-
-
 func ConfigureContainerInterface(
-	netnsFD int,        // Recebe o FD diretamente do IPC/Mapa
+	netnsFD int, // Recebe o FD diretamente do IPC/Mapa
 	tempPeerName string,
 	ip net.IP,
 	gateway net.IP,
@@ -237,7 +229,7 @@ func ConfigureContainerInterface(
 	if err := unix.Setns(netnsFD, unix.CLONE_NEWNET); err != nil {
 		return fmt.Errorf("setns to container failed: %w", err)
 	}
-	
+
 	// Garante que a thread volte para o namespace do Host ao final da função
 	defer netns.Set(origNS)
 
@@ -308,11 +300,6 @@ func ConfigureContainerInterface(
 	return nil
 }
 
-
-
-
-
-
 func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec, created map[lib.NamespaceType]int) *NetResources {
 	// 1. Alocação de IP
 	ip, err := scx.IPAlloc.Allocate()
@@ -324,11 +311,11 @@ func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec,
 	// 2. Setup do Veth Pair (Usando o FD do Namespace em vez do PID)
 	// IMPORTANTE: Passe o spec.ID para gerar nomes aleatórios ve- e vp-
 	//netnsFD := created[lib.NSNet]
-	
+
 	netres, err := SetupContainerVeth(
-		spec.ID,      // Para nomes únicos
-		"bctor0",     // Nome da Bridge
-		netnsFD,      // FD do namespace (Muito mais estável que PID)
+		spec.ID,  // Para nomes únicos
+		"bctor0", // Nome da Bridge
+		netnsFD,  // FD do namespace (Muito mais estável que PID)
 		ip,
 	)
 	if err != nil {
@@ -340,20 +327,20 @@ func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec,
 	// 3. Configuração interna do Container
 	gateway := net.ParseIP("10.0.0.1")
 	err = ConfigureContainerInterface(
-		netnsFD,           // FD do namespace
-		netres.PeerVeth,   // O nome temporário (vp-xxxx)
+		netnsFD,         // FD do namespace
+		netres.PeerVeth, // O nome temporário (vp-xxxx)
 		ip,
 		gateway,
-		scx.Subnet,        // O campo que corrigimos para não ser nil
+		scx.Subnet, // O campo que corrigimos para não ser nil
 	)
-	
+
 	if err != nil {
 		lib.LogError("Interface config failed inside container: %v", err)
 		scx.IPAlloc.Release(ip)
 		// Aqui você deve decidir se remove o veth do host para não sujar
 		return nil
 	}
-	
+
 	netres.IP = ip.String()
 	return netres
 }

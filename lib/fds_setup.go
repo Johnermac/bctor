@@ -59,6 +59,7 @@ func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
 	oob := unix.UnixRights(oobfds...)
 	return unix.Sendmsg(ipc.Init2Sup[1], buf, oob, nil, 0)
 }
+
 // Supervisor receives created namespace FDs from init
 func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
 	buf := make([]byte, 256)
@@ -152,8 +153,8 @@ func SendNamespaceFDs(
 	}
 
 	// ---- out-of-band ----
-	oob := unix.UnixRights(fds...)	
-	return unix.Sendmsg(ipc.Sup2Init[1], buf, oob, nil,	0)
+	oob := unix.UnixRights(fds...)
+	return unix.Sendmsg(ipc.Sup2Init[1], buf, oob, nil, 0)
 }
 
 // NEW > Joiner init ← Supervisor: receive N FDs + types

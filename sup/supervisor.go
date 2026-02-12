@@ -25,9 +25,9 @@ type Container struct {
 	Spec        *lib.ContainerSpec
 	InitPID     int
 	WorkloadPID int
-	State       ContainerState	
-	Namespaces 	map[lib.NamespaceType]*lib.NamespaceHandle	
-	Net 				*ntw.NetResources
+	State       ContainerState
+	Namespaces  map[lib.NamespaceType]*lib.NamespaceHandle
+	Net         *ntw.NetResources
 }
 
 func StartContainer(
@@ -51,15 +51,13 @@ func StartContainer(
 	if scx.ChildPID == 0 {
 		RunContainerInit(scx, spec, ipc)
 	} else {
-		fmt.Printf("[!] Supervisor: First fork done\n")
+		fmt.Printf("[!] Supervisor: Fork() Supervisor -> Container-init\n")
 
 		// userns handshake only if USER is created (not joined)
 		if spec.Namespaces.USER && !specJoins(spec, lib.NSUser) {
 			// Wait until child REALLY entered userns
-			buf := make([]byte, 1)
-			unix.Read(ipc.UserNSReady[0], buf)
-			unix.Close(ipc.UserNSReady[0])
-			
+			lib.WaitFd(ipc.UserNSReady[0])
+
 			if err := lib.SetupUserNSAndContinue(int(scx.ChildPID), ipc); err != nil {
 				fmt.Fprintf(os.Stderr, "[?] Supervisor: SetupUserNSAndContinue failed: %v\n", err)
 				return nil, err
@@ -67,10 +65,11 @@ func StartContainer(
 			fmt.Printf("[>] Supervisor: Successfully wrote maps and signaled child\n")
 		} else {
 			// For joiner: just signal the child to continue, no maps to set
-			unix.Write(ipc.UserNSPipe[1], []byte{1})			
+			lib.FreeFd(ipc.UserNSPipe[1])
+
 			fmt.Printf("[>] Supervisor: Signaled joiner to continue\n")
 		}
-		unix.Close(ipc.UserNSPipe[1])		
+		unix.Close(ipc.UserNSPipe[1])
 
 		// send shared namespace FDs to joiner
 		if len(spec.Shares) > 0 {
@@ -97,11 +96,10 @@ func StartContainer(
 func FinalizeContainer(
 	scx *lib.SupervisorCtx,
 	spec *lib.ContainerSpec,
-	containers map[string]*Container,	
+	containers map[string]*Container,
 	ipc *lib.IPC,
 ) *Container {
 
-	
 	workloadPID := lib.RecvWorkloadPID(ipc)
 	fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
 
@@ -109,7 +107,7 @@ func FinalizeContainer(
 	if createsAnyNamespace(spec) {
 		fds, err := lib.RecvCreatedNamespaceFDs(ipc)
 		if err == nil {
-			
+
 			lib.RegisterNamespaceHandles(scx, spec.ID, fds)
 			created = fds
 		}
@@ -117,22 +115,20 @@ func FinalizeContainer(
 
 	var netres *ntw.NetResources
 
-	if fd, ok := created[lib.NSNet]; ok && fd != 0 {
-		netres = ntw.NetworkConfig(fd, scx, spec, created)
-		if netres == nil {
-				lib.LogError("Supervisor: Network setup failed for %s. Cleanup might be needed.", spec.ID)
+	if spec.IsNetRoot {
+		if fd, ok := created[lib.NSNet]; ok && fd != 0 {
+			netres = ntw.NetworkConfig(fd, scx, spec, created)
+			if netres == nil {
+				lib.LogError("Supervisor: Network setup failed for %s.", spec.ID)
+			}
 		}
-  }		
 
-	if netres != nil {
-		lib.LogInfo("UNPAUSED")
-    unix.Write(ipc.NetReady[1], []byte{1})
-	} else {
-			lib.LogError("Network failed, container will stay frozen or exit")
+		lib.LogInfo("NETWORK CONFIGURED!")
+		lib.FreeFd(ipc.NetReady[1])
 	}
 
 	fmt.Printf("[>] Supervisor: Container %s created workload PID=%d\n", spec.ID, workloadPID)
-	
+
 	handles := make(map[lib.NamespaceType]*lib.NamespaceHandle)
 	for ns, fd := range created {
 		handles[ns] = &lib.NamespaceHandle{
@@ -148,13 +144,13 @@ func FinalizeContainer(
 		WorkloadPID: workloadPID,
 		State:       ContainerRunning,
 		Namespaces:  handles,
-		Net: 				 netres,
-	}	
+		Net:         netres,
+	}
 
 	unix.Close(ipc.Init2Sup[0])
-	unix.Close(ipc.Sup2Init[0])	
+	unix.Close(ipc.Sup2Init[0])
 
-	lib.LogInfo("Container %s finalized (PID: %d)", spec.ID, workloadPID)	
+	lib.LogInfo("Container %s finalized (PID: %d)", spec.ID, workloadPID)
 	return c
 }
 
@@ -170,7 +166,4 @@ func specJoins(spec *lib.ContainerSpec, ns lib.NamespaceType) bool {
 func createsAnyNamespace(spec *lib.ContainerSpec) bool {
 	n := spec.Namespaces
 	return n.USER || n.NET || n.MOUNT || n.PID || n.IPC || n.UTS || n.CGROUP
-}	
-
-	
-	
+}

@@ -4,7 +4,7 @@ import "golang.org/x/sys/unix"
 
 type IPC struct {
 	UserNSPipe  [2]int // pipe
-	UserNSReady [2]int // pipe	
+	UserNSReady [2]int // pipe
 	NetReady    [2]int // pipe
 	Init2Sup    [2]int // unix socket
 	Sup2Init    [2]int // unix socket
@@ -21,11 +21,11 @@ func NewIPC() (*IPC, error) {
 
 	if err = unix.Pipe(c.UserNSReady[:]); err != nil {
 		return nil, err
-	}	
-	
+	}
+
 	if err = unix.Pipe(c.NetReady[:]); err != nil {
 		return nil, err
-	}	
+	}
 
 	fds, err = unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET, 0)
 	if err != nil {

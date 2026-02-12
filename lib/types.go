@@ -8,17 +8,18 @@ import (
 )
 
 type ContainerSpec struct {
-	ID           string	
-	
+	ID string
+
 	FS           FSConfig
 	Capabilities CapsConfig
 	Cgroups      CGroupsConfig // nil = disabled
 	Seccomp      Profile
-	Workload     WorkloadSpec	
+	Workload     WorkloadSpec
 
 	Namespaces NamespaceConfig // what this container wants to CREATE
 	Shares     []ShareSpec     // what this container wants to JOIN
-	
+
+	IsNetRoot bool
 }
 
 type IPManager interface {
@@ -27,15 +28,13 @@ type IPManager interface {
 }
 
 type SupervisorCtx struct {
-	ParentNS 	*NamespaceState	
-	Handles 	map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
-	IPAlloc   IPManager
-	ChildPID 	uintptr       // init pid
-	WorkPID  	uintptr       // workload pid	
-	Subnet  	*net.IPNet
+	ParentNS *NamespaceState
+	Handles  map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
+	IPAlloc  IPManager
+	ChildPID uintptr // init pid
+	WorkPID  uintptr // workload pid
+	Subnet   *net.IPNet
 }
-
-
 
 // namespaces
 
@@ -62,7 +61,6 @@ type NamespaceHandle struct {
 	Ref  int // supervisor-owned refcount
 }
 
-
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
 	Args []string
@@ -83,6 +81,11 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 	ProfileIpLink: {
 		Path: "/bin/ip",
 		Args: []string{"ip", "addr", "show"},
+		Env:  os.Environ(),
+	},
+	ProfileLs: {
+		Path: "/bin/ls",
+		Args: []string{"ls", "/sys/class/net"},
 		Env:  os.Environ(),
 	},
 }
@@ -122,12 +125,13 @@ func DefaultShellSpec() *ContainerSpec {
 	return spec
 }
 
-func WriteSync(fd int) {
-	var b [1]byte
-	unix.Write(fd, b[:])
+// helper to wait
+func WaitFd(fd int) {
+	buf := make([]byte, 1)
+	unix.Read(fd, buf)
+	unix.Close(fd)
 }
 
-func ReadSync(fd int) {
-	var b [1]byte
-	unix.Read(fd, b[:])
+func FreeFd(fd int) {
+	unix.Write(fd, []byte{1})
 }

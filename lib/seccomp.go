@@ -11,10 +11,12 @@ import "fmt"
 type Profile int
 
 const (
-	ProfileDebugShell Profile = iota // busybox /bin/sh
-	ProfileWorkload                  // open port with nc
-	ProfileHello                     // minimal hello-world
-	ProfileIpLink                    // ip link show (requires NET_ADMIN)
+	ProfileDebugShell    Profile = iota // busybox /bin/sh
+	ProfileWorkload                     // open port with nc
+	ProfileHello                        // minimal hello-world
+	ProfileIpLink                       // ip link show (requires NET_ADMIN)
+	ProfileLs                           // listing files
+	ProfileNetworkVerify                // uses Go library to read instead of using /bin/ip
 )
 
 func ApplySeccomp(p Profile) error {

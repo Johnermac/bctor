@@ -3,23 +3,26 @@ package lib
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 
 	"golang.org/x/sys/unix"
 )
 
 type NamespaceConfig struct {
-	USER 		bool
-	NET 		bool
-	MOUNT 	bool
-	PID   	bool
-	IPC   	bool
-	UTS   	bool
-	CGROUP 	bool
+	USER   bool
+	NET    bool
+	MOUNT  bool
+	PID    bool
+	IPC    bool
+	UTS    bool
+	CGROUP bool
 }
-	
 
 func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	var flags int
 	shared := make(map[NamespaceType]int)
 
@@ -38,20 +41,17 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 		}
 
 		// Signal supervisor: userns is ready
-		unix.Write(ipc.UserNSReady[1], []byte{1})
+		FreeFd(ipc.UserNSReady[1])
 		unix.Close(ipc.UserNSReady[1])
 
 		// Wait for uid/gid maps
 		fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
-		if err := WaitForUserNSSetup(ipc); err != nil {
-			return fmt.Errorf("--[?] wait user ns setup failed: %w", err)
-		}
-		unix.Close(ipc.UserNSPipe[0])
+		WaitFd(ipc.UserNSPipe[0])
 		unix.Close(ipc.UserNSPipe[1])
 
 	} else if joiningUser {
 		fmt.Printf("--[>] Init: Joining shared userns=%d\n", shared[NSUser])
-		if err := unix.Setns(shared[NSUser], unix.CLONE_NEWUSER); err != nil {		
+		if err := unix.Setns(shared[NSUser], unix.CLONE_NEWUSER); err != nil {
 			return fmt.Errorf("setns(user): %w", err)
 		}
 		unix.Close(shared[NSUser])
@@ -71,7 +71,7 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 	// 3. Build unshare flags for non-shared namespaces
 	for _, ns := range []NamespaceType{
 		NSNet, NSMnt, NSPID, NSIPC, NSUTS, NSCgroup,
-	} {		
+	} {
 		if specWantsNamespace(spec, ns) {
 			if _, joined := shared[ns]; !joined {
 				flags |= nsTypeToCloneFlag(ns)
@@ -94,7 +94,6 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 	return nil
 }
 
-
 func flagsChecks(spec *ContainerSpec) error {
 	if spec.Namespaces.MOUNT {
 		// This is equivalent to 'mount --make-rprivate /'
@@ -103,7 +102,7 @@ func flagsChecks(spec *ContainerSpec) error {
 		if err != nil {
 			return err
 		}
-	}	
+	}
 
 	return nil
 }
@@ -179,13 +178,6 @@ func nsTypeToProcPath(ns NamespaceType) string {
 	default:
 		panic("unknown namespace type")
 	}
-}
-
-// Wait for the supervisor to signal that USER namespace setup is complete
-func WaitForUserNSSetup(ipc *IPC) error {
-	var buf [1]byte
-	_, err := unix.Read(ipc.UserNSPipe[0], buf[:])
-	return err
 }
 
 func SetupUserNSAndContinue(pid int, ipc *IPC) error {

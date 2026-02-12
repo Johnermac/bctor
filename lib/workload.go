@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"syscall"
 
@@ -13,7 +14,7 @@ func SetupRootAndSpawnWorkload(
 	pid uintptr,
 	ipc *IPC) {
 
-	if pid == 0 {	
+	if pid == 0 {
 
 		if spec.Namespaces.MOUNT {
 			fmt.Println("---[*] Workload: File System Setup")
@@ -23,19 +24,18 @@ func SetupRootAndSpawnWorkload(
 		os.Stdout.WriteString("---[*] Workload: Applying Capabilities isolation\n")
 		SetupCapabilities(spec.Capabilities)
 
-		profile := ProfileIpLink //set to arg in the future
+		profile := ProfileLs
+
 		/*fmt.Println("[*] Apply Seccomp Profile:", profile)
 		err := ApplySeccomp(profile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
-		}*/		
+		}*/
 
-		fmt.Println("PAUSE NETWORK")
-		buf := make([]byte, 1)
-		unix.Read(ipc.NetReady[0], buf)
-		unix.Close(ipc.NetReady[0])
-		
-		
+		if spec.IsNetRoot {
+			//LogInfo("PAUSE")
+			WaitFd(ipc.NetReady[0])
+		}
 
 		fmt.Println("---[*] Workload: Run Workload")
 		runWorkload(profile)
@@ -44,9 +44,9 @@ func SetupRootAndSpawnWorkload(
 		fmt.Fprintln(os.Stderr, "---[?] Workload: Returned unexpectedly")
 		unix.Exit(127)
 
-	} else {		
+	} else {
 
-		fmt.Printf("--[!] Init: Second fork done\n")
+		fmt.Printf("--[!] Init: Fork() Container-init -> Workload\n")
 		fmt.Printf(
 			"--[DBG] Init: container-init: PID=%d waiting for child PID=%d\n",
 			os.Getpid(), pid,
@@ -58,7 +58,7 @@ func SetupRootAndSpawnWorkload(
 
 func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	// 1. Always send workload PID
-	SendWorkloadPID(ipc, workloadPID)	
+	SendWorkloadPID(ipc, workloadPID)
 
 	// 2. Collect namespace FDs this container CREATED
 	handles := CollectCreatedNamespaceFDs(spec)
@@ -67,7 +67,7 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	}
 
 	// 3. Send namespace handles to supervisor
-	SendCreatedNamespaceFDs(ipc, handles)	
+	SendCreatedNamespaceFDs(ipc, handles)
 
 	var status unix.WaitStatus
 	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)
@@ -96,10 +96,27 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 func runWorkload(profile Profile) {
 
 	//os.Stdout.Sync()
-  //os.Stderr.Sync()
+	//os.Stderr.Sync()
 
 	if profile == ProfileHello {
 		syscall.Write(1, []byte("\n---[!] EXEC: Hello Seccomp!\n"))
+		syscall.Exit(0)
+	}
+
+	if profile == ProfileNetworkVerify {
+		fmt.Println("---[*] Workload: Native Network Verification")
+
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		for _, iface := range interfaces {
+			addrs, _ := iface.Addrs()
+			fmt.Printf("  -> Interface: %s | MTU: %d | Addrs: %v\n",
+				iface.Name, iface.MTU, addrs)
+		}
 		syscall.Exit(0)
 	}
 
