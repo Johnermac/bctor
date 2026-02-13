@@ -1,8 +1,7 @@
 package sup
 
 import (
-	"fmt"
-
+	"github.com/Johnermac/bctor/lib"
 	"golang.org/x/sys/unix"
 )
 
@@ -14,16 +13,16 @@ func StartReaper(events chan<- Event) {
 				if err == unix.EINTR || err == unix.ECHILD {
 					continue
 				}
-				fmt.Printf("[!] Supervisor: Reaper fatal error: %v\n", err)
+				lib.LogError("Supervisor: Reaper fatal error: %v\n", err)
 				continue
 			}
-
+/*
 			fmt.Printf(
 				"[DBG] Supervisor: Reaper: pid=%d exited=%v signaled=%v\n",
 				pid,
 				status.Exited(),
 				status.Signaled(),
-			)
+			)*/
 
 			events <- Event{
 				Type:   EventChildExit,

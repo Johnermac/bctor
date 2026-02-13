@@ -2,9 +2,8 @@ package lib
 
 import (
 	"fmt"
-	"net"
 	"os"
-	"syscall"
+	"os/exec"
 
 	"golang.org/x/sys/unix"
 )
@@ -15,16 +14,19 @@ func SetupRootAndSpawnWorkload(
 	ipc *IPC) {
 
 	if pid == 0 {
+		//workload	
+		//DebugMountContext()	
 
 		if spec.Namespaces.MOUNT {
-			fmt.Println("---[*] Workload: File System Setup")
-			FileSystemSetup(spec.FS)
+			LogInfo("Workload: File System Setup")
+			FileSystemSetup(spec.FS)			
 		}
 
-		os.Stdout.WriteString("---[*] Workload: Applying Capabilities isolation\n")
+		LogInfo("Workload: Applying Capabilities isolation")
 		SetupCapabilities(spec.Capabilities)
+		//DebugMountContext()
 
-		profile := ProfileLs
+		
 
 		/*fmt.Println("[*] Apply Seccomp Profile:", profile)
 		err := ApplySeccomp(profile)
@@ -37,20 +39,18 @@ func SetupRootAndSpawnWorkload(
 			WaitFd(ipc.NetReady[0])
 		}
 
-		fmt.Println("---[*] Workload: Run Workload")
-		runWorkload(profile)
+		//fmt.Println("---[*] Workload: Run Workload")
+		
+		runWorkload(spec, ipc)
 
 		// If we get here, exec failed
-		fmt.Fprintln(os.Stderr, "---[?] Workload: Returned unexpectedly")
+		LogError("Workload: Returned unexpectedly")
 		unix.Exit(127)
 
 	} else {
 
-		fmt.Printf("--[!] Init: Fork() Container-init -> Workload\n")
-		fmt.Printf(
-			"--[DBG] Init: container-init: PID=%d waiting for child PID=%d\n",
-			os.Getpid(), pid,
-		)
+		//fmt.Printf("Init: Fork() Container-init -> Workload\n")
+		//fmt.Printf("Init: container-init: PID=%d waiting for child PID=%d\n",os.Getpid(), pid)
 		// notify supervisor of workload PID
 		initWorkloadHandling(spec, int(pid), ipc)
 	}
@@ -62,77 +62,60 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 
 	// 2. Collect namespace FDs this container CREATED
 	handles := CollectCreatedNamespaceFDs(spec)
-	if len(handles) == 0 {
-		return
-	}
+	//if len(handles) == 0 { return	}
 
 	// 3. Send namespace handles to supervisor
 	SendCreatedNamespaceFDs(ipc, handles)
 
 	var status unix.WaitStatus
-	wpid, _ := unix.Wait4(workloadPID, &status, 0, nil)
+	_, _ = unix.Wait4(workloadPID, &status, 0, nil)
 
-	fmt.Printf(
-		"--[DBG] Init: Wait returned: wpid=%d exited=%v signaled=%v status=%v\n",
+	/*fmt.Printf(
+		"Init: Wait returned: wpid=%d exited=%v signaled=%v status=%v\n",
 		wpid,
 		status.Exited(),
 		status.Signaled(),
 		status,
-	)
+	)*/
 
 	if status.Exited() {
-		fmt.Printf("--[DBG] Init: Exiting with %d\n", status.ExitStatus())
+		LogWarn("Init: Exiting %s with %d\n", spec.ID, status.ExitStatus())
 		os.Exit(status.ExitStatus())
 	}
 	if status.Signaled() {
-		fmt.Printf("--[DBG] Init: Exiting via signal %d\n", status.Signal())
+		LogWarn("Init: Exiting %s via signal %d\n", spec.ID, status.Signal())
 		os.Exit(128 + int(status.Signal()))
 	}
 
-	fmt.Println("--[DBG] Init: Exiting cleanly")
+	LogWarn("Init: Exiting %s cleanly", spec.ID)
 	os.Exit(0)
 }
 
-func runWorkload(profile Profile) {
+func runWorkload(spec *ContainerSpec, ipc *IPC) {
+	//LogInfo("profile: %v", spec.Seccomp)
+	spec.Seccomp = ProfileIpLink	
+	
+	wspec, ok := WorkloadRegistry[spec.Seccomp]
+    if !ok { os.Exit(1) }
 
-	//os.Stdout.Sync()
-	//os.Stderr.Sync()
+    // Close the read end inside the child (best practice)
+    unix.Close(ipc.Log2Sup[1])
 
-	if profile == ProfileHello {
-		syscall.Write(1, []byte("\n---[!] EXEC: Hello Seccomp!\n"))
-		syscall.Exit(0)
-	}
+    cmd := exec.Command(wspec.Path, wspec.Args[1:]...)
+    cmd.Env = wspec.Env
 
-	if profile == ProfileNetworkVerify {
-		fmt.Println("---[*] Workload: Native Network Verification")
+    // Convert the FD to a Go *os.File for the Cmd struct
+    logFile := os.NewFile(uintptr(ipc.Log2Sup[0]), "log-socket")
+    
+    cmd.Stdout = logFile
+    cmd.Stderr = logFile // Redirect both to the same socket
 
-		interfaces, err := net.Interfaces()
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
+    // Run the process
+    if err := cmd.Run(); err != nil {
+        fmt.Fprintf(logFile, "Workload execution failed: %v\n", err)
+    }
 
-		for _, iface := range interfaces {
-			addrs, _ := iface.Addrs()
-			fmt.Printf("  -> Interface: %s | MTU: %d | Addrs: %v\n",
-				iface.Name, iface.MTU, addrs)
-		}
-		syscall.Exit(0)
-	}
-
-	if spec, ok := WorkloadRegistry[profile]; ok {
-		fmt.Printf("---[*] Executing: %s %v\n", spec.Path, spec.Args)
-
-		err := unix.Exec(spec.Path, spec.Args, spec.Env)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "---[?] Exec failed for %s: %v\n", spec.Path, err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Fprintln(os.Stderr, "---[?] No workload spec found for this profile")
-		os.Exit(1)
-	}
-
-	// unreachable
-	unix.Exit(0)
+    // Explicitly close before exiting to signal EOF to Supervisor
+    logFile.Close()
+    os.Exit(0)
 }

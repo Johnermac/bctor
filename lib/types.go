@@ -2,7 +2,6 @@ package lib
 
 import (
 	"net"
-	"os"
 
 	"golang.org/x/sys/unix"
 )
@@ -64,29 +63,33 @@ type NamespaceHandle struct {
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
 	Args []string
-	Env  []string
+	Env  []string	
 }
 
 var WorkloadRegistry = map[Profile]WorkloadSpec{
 	ProfileDebugShell: {
 		Path: "/bin/sh",
-		Args: []string{"sh"},
-		Env:  []string{"PATH=/bin"},
+		Args: []string{"sh", "-i"},
+		Env:  []string{
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"TERM=xterm-256color",
+			"HOME=/root",
+		},
 	},
 	ProfileWorkload: {
 		Path: "/bin/nc",
 		Args: []string{"nc", "-lp", "80"},
-		Env:  os.Environ(),
+		Env:  []string{"PATH=/bin:/usr/bin"},
 	},
 	ProfileIpLink: {
 		Path: "/bin/ip",
 		Args: []string{"ip", "addr", "show"},
-		Env:  os.Environ(),
+		Env:  []string{"PATH=/bin:/sbin:/usr/bin"},
 	},
 	ProfileLs: {
 		Path: "/bin/ls",
-		Args: []string{"ls", "/sys/class/net"},
-		Env:  os.Environ(),
+		Args: []string{"ls", "-la", "/sys/class/net"},
+		Env:  []string{"PATH=/bin:/usr/bin"},
 	},
 }
 
@@ -134,4 +137,5 @@ func WaitFd(fd int) {
 
 func FreeFd(fd int) {
 	unix.Write(fd, []byte{1})
+	unix.Close(fd)
 }

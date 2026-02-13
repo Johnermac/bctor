@@ -94,3 +94,33 @@ if err != nil {
 }
 LogCapPosture("grand-child", capStateChild)
 ```
+
+just bkp of some profile commands:
+```go
+if spec.Seccomp == ProfileHello {
+		LogInfo("[%s] >>>>>>> Hello Seccomp!", spec.ID)
+		os.Exit(0)
+	}
+
+	if spec.Seccomp == ProfileNetworkVerify {
+
+		files, _ := os.ReadDir("/bin")
+		for _, f := range files {
+			LogInfo("[%s] /bin contains: %s", spec.ID, f.Name())
+		}
+		files, _ = os.ReadDir("/proc")
+		for _, f := range files {
+			LogInfo("[%s] /proc contains: %s", spec.ID, f.Name())
+		}
+
+		links, _ := netlink.LinkList()
+
+		var buf bytes.Buffer
+		for _, ln := range links {
+			fmt.Fprintf(&buf, "%s\n", ln.Attrs().Name)
+		}
+
+		LogInfo("[%s]\n%s", spec.ID, buf.String())
+		os.Exit(0)
+	}
+	```

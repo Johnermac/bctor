@@ -40,12 +40,14 @@ func CollectCreatedNamespaceFDs(spec *ContainerSpec) map[NamespaceType]int {
 // Send created namespace FDs from init to supervisor
 func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
 	count := len(fds)
-	if count == 0 {
-		return nil
-	}
 
 	buf := make([]byte, 1+count)
 	buf[0] = byte(count)
+
+	if count == 0 {
+		err := unix.Sendmsg(ipc.Init2Sup[1], buf, nil, nil, 0)
+    return err
+	}
 
 	oobfds := make([]int, 0, count)
 
@@ -64,7 +66,7 @@ func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
 func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
 	buf := make([]byte, 256)
 	oob := make([]byte, unix.CmsgSpace(8*8))
-
+	//LogInfo("RecvCreatedNamespaceFDs")
 	n, oobn, _, _, err := unix.Recvmsg(ipc.Init2Sup[0], buf, oob, 0)
 	if err != nil {
 		return nil, err
@@ -76,7 +78,7 @@ func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
 
 	count := int(buf[0])
 	if count == 0 {
-		return nil, nil
+		return make(map[NamespaceType]int), nil
 	}
 
 	cmsgs, err := unix.ParseSocketControlMessage(oob[:oobn])
@@ -112,6 +114,7 @@ func SendWorkloadPID(ipc *IPC, pid int) error {
 // Supervisor receives workload PID from init
 func RecvWorkloadPID(ipc *IPC) int {
 	buf := make([]byte, 4)
+	//LogInfo("RecvWorkloadPID")
 
 	n, _, _, _, err := unix.Recvmsg(ipc.Init2Sup[0], buf, nil, 0)
 	if err != nil {
@@ -161,7 +164,7 @@ func SendNamespaceFDs(
 func RecvNamespaceFDs(ipc *IPC) map[NamespaceType]int {
 	// max: count(1) + N types
 	buf := make([]byte, 32)
-
+	//LogInfo("RecvNamespaceFDs")
 	oob := make([]byte, unix.CmsgSpace(8*8)) // up to 8 FDs
 	_, oobn, _, _, err := unix.Recvmsg(ipc.Sup2Init[0], buf, oob, 0)
 	if err != nil {

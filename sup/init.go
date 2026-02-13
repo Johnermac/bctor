@@ -1,7 +1,6 @@
 package sup
 
 import (
-	"fmt"
 	"os"
 	"runtime"
 
@@ -17,28 +16,28 @@ func RunContainerInit(
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	os.Stdout.WriteString("--[*] Init: Start to Apply Namespaces\n")
+	lib.LogInfo("Init: Start to Apply Namespaces")
 	if err := lib.ApplyNamespaces(spec, ipc); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Init: Failed to apply namespaces: %v\n", err)
-		fmt.Fprintf(os.Stderr, "--[!] Init: full spec: %+v\n", spec.Namespaces)
+		lib.LogError(" Init: Failed to apply namespaces: %v\n", err)
+		lib.LogError(" Init: full spec: %+v\n", spec.Namespaces)
 		os.Exit(1)
 	}
 
 	if spec.Namespaces.AnyEnabled() {
-		os.Stdout.WriteString("\n--[*] PARENT-CHILD\n")
+		//os.Stdout.WriteString("\n--[*] PARENT-CHILD\n")
 		lib.LogNamespace(scx.ParentNS, os.Getpid())
 	}
 
 	// CONTROLS
 
 	if spec.Namespaces.CGROUP {
-		os.Stdout.WriteString("--[*] Init: CGroup\n")
+		//os.Stdout.WriteString("--[*] Init: CGroup\n")
 		lib.SetupCgroups(spec.Namespaces.CGROUP, spec.Cgroups)
-	}
+	}	
 
 	pid, err := lib.NewFork()
 	if err != nil {
-		os.Stdout.WriteString("--[?] Fork failed: " + err.Error() + "\n")
+		lib.LogError("Fork failed: %v", err)
 		return
 	}
 

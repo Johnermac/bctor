@@ -1,8 +1,6 @@
 package lib
 
 import (
-	"fmt"
-	"os"
 	"runtime"
 	"strconv"
 
@@ -35,24 +33,24 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 	_, joiningUser := shared[NSUser]
 
 	if spec.Namespaces.USER && !joiningUser {
-		fmt.Printf("--[>] Init: Creating new userns\n")
+		//fmt.Printf("--[>] Init: Creating new userns\n")
 		if err := unix.Unshare(unix.CLONE_NEWUSER); err != nil {
-			return fmt.Errorf("unshare(user): %w", err)
+			return LogError("unshare(user): %v", err)
 		}
 
 		// Signal supervisor: userns is ready
-		FreeFd(ipc.UserNSReady[1])
-		unix.Close(ipc.UserNSReady[1])
+		FreeFd(ipc.UserNSReady[1])		
 
 		// Wait for uid/gid maps
-		fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
+		//fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
+		
 		WaitFd(ipc.UserNSPipe[0])
 		unix.Close(ipc.UserNSPipe[1])
 
 	} else if joiningUser {
-		fmt.Printf("--[>] Init: Joining shared userns=%d\n", shared[NSUser])
+		//fmt.Printf("--[>] Init: Joining shared userns=%d\n", shared[NSUser])
 		if err := unix.Setns(shared[NSUser], unix.CLONE_NEWUSER); err != nil {
-			return fmt.Errorf("setns(user): %w", err)
+			return LogError("setns(user): %v", err)
 		}
 		unix.Close(shared[NSUser])
 	}
@@ -63,7 +61,7 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 			continue // already handled
 		}
 		if err := unix.Setns(fd, nsTypeToCloneFlag(ns)); err != nil {
-			return fmt.Errorf("setns(%v): %w", ns, err)
+			return LogError("setns(%v): %v", ns, err)
 		}
 		unix.Close(fd)
 	}
@@ -81,14 +79,14 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 
 	// 4. Unshare remaining namespaces
 	if flags != 0 {
-		fmt.Printf("--[>] Init: Unsharing namespaces with flags: %x\n", flags)
+		//fmt.Printf("--[>] Init: Unsharing namespaces with flags: %x\n", flags)
 		if err := unix.Unshare(flags); err != nil {
-			return fmt.Errorf("unshare: %w", err)
+			return LogError("unshare: %v", err)
 		}
 	}
 
 	if err := flagsChecks(spec); err != nil {
-		return fmt.Errorf("--[?] flag check failed: %v", err)
+		return LogError("flag check failed: %v", err)
 	}
 
 	return nil
@@ -134,6 +132,7 @@ func nsTypeToCloneFlag(t NamespaceType) int {
 	case NSCgroup:
 		return unix.CLONE_NEWCGROUP
 	default:
+		LogError("nsTypeToCloneFlag")
 		panic("unknown ns type")
 	}
 }
@@ -176,6 +175,7 @@ func nsTypeToProcPath(ns NamespaceType) string {
 	case NSCgroup:
 		return "/proc/self/ns/cgroup"
 	default:
+		LogError("nsTypeToProcPath")
 		panic("unknown namespace type")
 	}
 }
@@ -184,22 +184,22 @@ func SetupUserNSAndContinue(pid int, ipc *IPC) error {
 	pidStr := strconv.Itoa(pid)
 
 	if err := denySetgroups(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to deny setgroups for PID %s: %v\n", pidStr, err)
+		LogError("Failed to deny setgroups for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
+	//fmt.Printf("[>] Supervisor: Denied setgroups for PID %s\n", pidStr)
 
 	if err := writeUIDMap(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to write UID map for PID %s: %v\n", pidStr, err)
+		LogError("Failed to write UID map for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
+	//fmt.Printf("[>] Supervisor: Wrote UID map for PID %s\n", pidStr)
 
 	if err := writeGIDMap(pidStr); err != nil {
-		fmt.Fprintf(os.Stderr, "--[?] Failed to write GID map for PID %s: %v\n", pidStr, err)
+		LogError("Failed to write GID map for PID %s: %v\n", pidStr, err)
 		return err
 	}
-	fmt.Printf("[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
+	//fmt.Printf("[>] Supervisor: Wrote GID map for PID %s\n", pidStr)
 
 	_, err := unix.Write(ipc.UserNSPipe[1], []byte{1})
 	return err

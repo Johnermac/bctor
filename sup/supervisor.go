@@ -1,7 +1,6 @@
 package sup
 
 import (
-	"fmt"
 	"os"
 	"runtime"
 
@@ -51,25 +50,24 @@ func StartContainer(
 	if scx.ChildPID == 0 {
 		RunContainerInit(scx, spec, ipc)
 	} else {
-		fmt.Printf("[!] Supervisor: Fork() Supervisor -> Container-init\n")
+		//fmt.Printf("[!] Supervisor: Fork() Supervisor -> Container-init\n")
 
 		// userns handshake only if USER is created (not joined)
 		if spec.Namespaces.USER && !specJoins(spec, lib.NSUser) {
-			// Wait until child REALLY entered userns
+			// Wait until child REALLY entered userns			
 			lib.WaitFd(ipc.UserNSReady[0])
 
 			if err := lib.SetupUserNSAndContinue(int(scx.ChildPID), ipc); err != nil {
-				fmt.Fprintf(os.Stderr, "[?] Supervisor: SetupUserNSAndContinue failed: %v\n", err)
+				lib.LogError("Supervisor: SetupUserNSAndContinue failed: %v\n", err)
 				return nil, err
 			}
-			fmt.Printf("[>] Supervisor: Successfully wrote maps and signaled child\n")
+			//fmt.Printf("[>] Supervisor: Successfully wrote maps and signaled child\n")
 		} else {
 			// For joiner: just signal the child to continue, no maps to set
 			lib.FreeFd(ipc.UserNSPipe[1])
 
-			fmt.Printf("[>] Supervisor: Signaled joiner to continue\n")
-		}
-		unix.Close(ipc.UserNSPipe[1])
+		//	fmt.Printf("[>] Supervisor: Signaled joiner to continue\n")
+		}		
 
 		// send shared namespace FDs to joiner
 		if len(spec.Shares) > 0 {
@@ -101,10 +99,11 @@ func FinalizeContainer(
 ) *Container {
 
 	workloadPID := lib.RecvWorkloadPID(ipc)
-	fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
+	//fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
 
 	var created map[lib.NamespaceType]int
-	if createsAnyNamespace(spec) {
+	if createsAnyNamespace(spec) || len(spec.Shares) > 0 {
+		//lib.LogInfo("Supervisor: Waiting for CreatedNamespaceFDs from %s", spec.ID)
 		fds, err := lib.RecvCreatedNamespaceFDs(ipc)
 		if err == nil {
 
@@ -125,9 +124,9 @@ func FinalizeContainer(
 
 		lib.LogInfo("NETWORK CONFIGURED!")
 		lib.FreeFd(ipc.NetReady[1])
-	}
+	}	
 
-	fmt.Printf("[>] Supervisor: Container %s created workload PID=%d\n", spec.ID, workloadPID)
+	//fmt.Printf("[>] Supervisor: Container %s created workload PID=%d\n", spec.ID, workloadPID)
 
 	handles := make(map[lib.NamespaceType]*lib.NamespaceHandle)
 	for ns, fd := range created {
