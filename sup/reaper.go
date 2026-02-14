@@ -16,13 +16,13 @@ func StartReaper(events chan<- Event) {
 				lib.LogError("Supervisor: Reaper fatal error: %v\n", err)
 				continue
 			}
-/*
-			fmt.Printf(
-				"[DBG] Supervisor: Reaper: pid=%d exited=%v signaled=%v\n",
-				pid,
-				status.Exited(),
-				status.Signaled(),
-			)*/
+			/*
+				fmt.Printf(
+					"[DBG] Supervisor: Reaper: pid=%d exited=%v signaled=%v\n",
+					pid,
+					status.Exited(),
+					status.Signaled(),
+				)*/
 
 			events <- Event{
 				Type:   EventChildExit,

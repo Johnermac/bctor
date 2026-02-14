@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,6 +32,7 @@ type IPAllocator struct {
 	Subnet *net.IPNet
 	Next   int
 	Used   map[string]bool
+	mu     sync.Mutex
 }
 
 func EnsureBridge(name, cidr string) error {
@@ -112,6 +114,9 @@ func NewIPAlloc(cidr string) (*IPAllocator, error) {
 }
 
 func (a *IPAllocator) Allocate() (net.IP, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	for a.Next < 254 {
 		ip := make(net.IP, len(a.Base))
 		copy(ip, a.Base)
@@ -301,21 +306,18 @@ func ConfigureContainerInterface(
 }
 
 func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec, created map[lib.NamespaceType]int) *NetResources {
-	// 1. Alocação de IP
+
 	ip, err := scx.IPAlloc.Allocate()
+
 	if err != nil || ip == nil {
 		lib.LogError("IP allocation failed for %s: %v", spec.ID, err)
 		return nil
 	}
 
-	// 2. Setup do Veth Pair (Usando o FD do Namespace em vez do PID)
-	// IMPORTANTE: Passe o spec.ID para gerar nomes aleatórios ve- e vp-
-	//netnsFD := created[lib.NSNet]
-
 	netres, err := SetupContainerVeth(
-		spec.ID,  // Para nomes únicos
-		"bctor0", // Nome da Bridge
-		netnsFD,  // FD do namespace (Muito mais estável que PID)
+		spec.ID,  //
+		"bctor0", // Bridge
+		netnsFD,  // FD do namespace
 		ip,
 	)
 	if err != nil {
@@ -328,16 +330,15 @@ func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec,
 	gateway := net.ParseIP("10.0.0.1")
 	err = ConfigureContainerInterface(
 		netnsFD,         // FD do namespace
-		netres.PeerVeth, // O nome temporário (vp-xxxx)
+		netres.PeerVeth, // temp name (vp-xxxx)
 		ip,
 		gateway,
-		scx.Subnet, // O campo que corrigimos para não ser nil
+		scx.Subnet,
 	)
 
 	if err != nil {
 		lib.LogError("Interface config failed inside container: %v", err)
 		scx.IPAlloc.Release(ip)
-		// Aqui você deve decidir se remove o veth do host para não sujar
 		return nil
 	}
 

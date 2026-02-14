@@ -39,11 +39,11 @@ func ApplyNamespaces(spec *ContainerSpec, ipc *IPC) error {
 		}
 
 		// Signal supervisor: userns is ready
-		FreeFd(ipc.UserNSReady[1])		
+		FreeFd(ipc.UserNSReady[1])
 
 		// Wait for uid/gid maps
 		//fmt.Fprintf(os.Stderr, "--[>] Init: Handshake\n")
-		
+
 		WaitFd(ipc.UserNSPipe[0])
 		unix.Close(ipc.UserNSPipe[1])
 

@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"sync"
 
 	"github.com/Johnermac/bctor/lib"
 	"github.com/Johnermac/bctor/lib/ntw"
 	"github.com/Johnermac/bctor/sup"
-	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -29,9 +30,10 @@ func main() {
 	sup.StartSignalHandler(events)
 
 	// LOG SETUP
-  logChan := make(chan lib.LogMsg, 200)
+	loggerDone := make(chan bool)
+	logChan := make(chan lib.LogMsg, 200)
 	lib.GlobalLogChan = logChan // Connect the pipes
-	lib.StartGlobalLogger(logChan)
+	go lib.StartGlobalLogger(logChan, loggerDone)
 
 	// NETWORK SETUP
 	//lib.LogInfo("Supervisor: Container networking setup")
@@ -39,65 +41,76 @@ func main() {
 	iface, _ := ntw.DefaultRouteInterface()
 	ntw.AddNATRule("10.0.0.0/24", iface)
 
-	if err := ntw.EnsureBridge("bctor0", "10.0.0.1/24"); err != nil { return }
+	if err := ntw.EnsureBridge("bctor0", "10.0.0.1/24"); err != nil {
+		return
+	}
 	alloc, _ := ntw.NewIPAlloc("10.0.0.0/24")
 	scx.IPAlloc = alloc
-	scx.Subnet = alloc.Subnet
+	scx.Subnet = alloc.Subnet	
+	
+	rootReady := make(chan *sup.Container, 1)
+	var wg sync.WaitGroup	
 
-	go sup.OnContainerExit(containers, &scx, events, iface)
+	wg.Add(1) // close OnContainerExit
+	go sup.OnContainerExit(containers, &scx, events, iface, &wg, N)
+	scx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())
 
-	var rootContainer *sup.Container
-	//lib.LogInfo("Supervisor: Starting %d containers", N)
+	wg.Add(1) // close after this main loop
+	for i := 1; i <= N; i++ {    
+    ipc, _ := lib.NewIPC()
+    wg.Add(1) // close on CaptureLogs
+    
+    if i == 1 {
+        // --- CREATOR ---
+        spec := lib.DefaultShellSpec()
+        spec.ID = fmt.Sprintf("bctor-c%d", i)
+        spec.IsNetRoot = true
 
-	// MAIN LOOP
+        
+        lib.LogInfo("Container %s=Creator", spec.ID)
+        c, err := sup.StartContainer(spec, logChan, &scx, containers, ipc, &wg)
+        if err != nil {
+            lib.LogError("Start Root failed: %v", err)           
+            return 
+        }
+        c.IPC = ipc
+        rootReady <- c        
+    } else {
+        // --- JOINERS ---
+        root := <-rootReady
+        rootReady <- root        
+        
+        go func(index int, jipc *lib.IPC) {            
+            
+            jspec := lib.DefaultShellSpec()
+            jspec.ID = fmt.Sprintf("bctor-c%d", index)
+            jspec.Namespaces.USER = false
+            jspec.Namespaces.MOUNT = true
+            jspec.Namespaces.NET = true
+            jspec.Namespaces.PID = false
+            jspec.IsNetRoot = false
+            jspec.Shares = []lib.ShareSpec{
+                {Type: lib.NSUser, FromContainer: root.Spec.ID},
+                {Type: lib.NSNet, FromContainer: root.Spec.ID},
+            }
 
-	for i := 1; i <= N; i++ {
-		ipc, err := lib.NewIPC()
-		if err != nil {
-			lib.LogError("Failed to create IPC for container %d: %v", i, err)
-			continue
-		}
-
-		lib.LogInfo("-> Supervisor: container %d Flow started", i)
-		spec := lib.DefaultShellSpec()
-		spec.ID = fmt.Sprintf("bctor-c%d", i)
-
-		if i == 1 {
-			// 1st is the creator
-			spec.IsNetRoot = true			
-			lib.LogInfo("Container %s=Creator", spec.ID)
-		} else {
-			// rest are joiners
-			spec.Namespaces.USER = false
-			spec.Namespaces.MOUNT = false
-			spec.Namespaces.NET = false
-			spec.Namespaces.PID = true
-			spec.IsNetRoot = false
-			spec.Shares = []lib.ShareSpec{
-				{Type: lib.NSUser, FromContainer: rootContainer.Spec.ID},
-				{Type: lib.NSNet, FromContainer: rootContainer.Spec.ID},
-				{Type: lib.NSMnt, FromContainer: rootContainer.Spec.ID},
-			}
-			lib.LogInfo("Container %s=Joiner of: %s", spec.ID, rootContainer.Spec.ID)
-		}
-
-		c, err := sup.StartContainer(spec, &scx, containers, ipc)
-		if err != nil {
-			lib.LogError("Failed to start container %d: %v", i, err)
-			continue
-		}
-		
-		// --- LOGGING INTEGRATION ---
-    // 3. Supervisor logic
-		unix.Close(ipc.Log2Sup[0]) 	
-		go lib.CaptureLogs(c.Spec.ID, ipc.Log2Sup[1], logChan)		
-
-		containers[c.Spec.ID] = c
-		if i == 1 {
-			rootContainer = c
-		}
+            lib.LogInfo("Container %s=Joiner of: %s", jspec.ID, root.Spec.ID)
+            cj, err := sup.StartContainer(jspec, logChan, &scx, containers, jipc, &wg)
+            if err != nil {
+                lib.LogError("Start Joiner %s failed: %v", jspec.ID, err)
+                return
+            }           
+            cj.IPC = jipc
+            lib.FreeFd(cj.IPC.KeepAlive[1])
+        }(i, ipc)
+    }
 	}
+	wg.Done()
 
-	select {}
-	//sup lives forever
+	lib.LogInfo("Supervisor: Waiting for containers to produce output...")
+  
+	wg.Wait()
+	close(logChan)
+	<-loggerDone
+	
 }

@@ -23,17 +23,15 @@ func RunContainerInit(
 		os.Exit(1)
 	}
 
-	if spec.Namespaces.AnyEnabled() {
-		//os.Stdout.WriteString("\n--[*] PARENT-CHILD\n")
-		lib.LogNamespace(scx.ParentNS, os.Getpid())
-	}
+	//debug only
+	//if spec.Namespaces.AnyEnabled() { lib.LogNamespace(scx.ParentNS, os.Getpid()) }
 
 	// CONTROLS
 
 	if spec.Namespaces.CGROUP {
 		//os.Stdout.WriteString("--[*] Init: CGroup\n")
 		lib.SetupCgroups(spec.Namespaces.CGROUP, spec.Cgroups)
-	}	
+	}
 
 	pid, err := lib.NewFork()
 	if err != nil {

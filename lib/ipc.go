@@ -8,7 +8,8 @@ type IPC struct {
 	NetReady    [2]int // pipe
 	Init2Sup    [2]int // unix socket
 	Sup2Init    [2]int // unix socket
-	Log2Sup 		[2]int // stdout/stderr
+	Log2Sup     [2]int // stdout/stderr
+	KeepAlive   [2]int // pause the C1 to hold net ns
 }
 
 func NewIPC() (*IPC, error) {
@@ -28,6 +29,10 @@ func NewIPC() (*IPC, error) {
 		return nil, err
 	}
 
+	if err = unix.Pipe(c.KeepAlive[:]); err != nil {
+		return nil, err
+	}
+
 	fds, err = unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET, 0)
 	if err != nil {
 		return nil, err
@@ -42,9 +47,9 @@ func NewIPC() (*IPC, error) {
 
 	fds, err = unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0) // Use SOCK_STREAM for logs
 	if err != nil {
-			return nil, err
+		return nil, err
 	}
-  c.Log2Sup = fds
+	c.Log2Sup = fds
 
 	return &c, nil
 }

@@ -2,6 +2,7 @@ package lib
 
 import (
 	"net"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -29,10 +30,12 @@ type IPManager interface {
 type SupervisorCtx struct {
 	ParentNS *NamespaceState
 	Handles  map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
+	
 	IPAlloc  IPManager
-	ChildPID uintptr // init pid
-	WorkPID  uintptr // workload pid
+	//ChildPID uintptr // init pid
+	//WorkPID  uintptr // workload pid
 	Subnet   *net.IPNet
+	Mu       sync.Mutex
 }
 
 // namespaces
@@ -63,14 +66,14 @@ type NamespaceHandle struct {
 type WorkloadSpec struct {
 	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
 	Args []string
-	Env  []string	
+	Env  []string
 }
 
 var WorkloadRegistry = map[Profile]WorkloadSpec{
 	ProfileDebugShell: {
 		Path: "/bin/sh",
 		Args: []string{"sh", "-i"},
-		Env:  []string{
+		Env: []string{
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 			"TERM=xterm-256color",
 			"HOME=/root",
@@ -88,7 +91,7 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 	},
 	ProfileLs: {
 		Path: "/bin/ls",
-		Args: []string{"ls", "-la", "/sys/class/net"},
+		Args: []string{"ls", "/sys/class/net"},
 		Env:  []string{"PATH=/bin:/usr/bin"},
 	},
 }
@@ -99,7 +102,7 @@ func DefaultShellSpec() *ContainerSpec {
 		USER:   true, //almost everything needs this enabled
 		MOUNT:  true,
 		CGROUP: false, //needs root cause /sys/fs/cgroup
-		PID:    false,
+		PID:    true,
 		UTS:    false,
 		NET:    true, // set to true for container 1, container 2 will join this netns
 		IPC:    false,

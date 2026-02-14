@@ -13,20 +13,37 @@ func SetupRootAndSpawnWorkload(
 	pid uintptr,
 	ipc *IPC) {
 
-	if pid == 0 {
-		//workload	
-		//DebugMountContext()	
+	if pid == 0 {		  
+    unix.Dup2(ipc.Log2Sup[1], 1) // Redirect Stdout
+    unix.Dup2(ipc.Log2Sup[1], 2) // Redirect Stderr
+   
+    unix.Close(ipc.Log2Sup[0])
+    unix.Close(ipc.Log2Sup[1])
 
-		if spec.Namespaces.MOUNT {
-			LogInfo("Workload: File System Setup")
-			FileSystemSetup(spec.FS)			
+		if spec.Namespaces.MOUNT {			
+			if err := PrepareRoot(spec.FS); err != nil {
+				LogError("prepare")
+				unix.Exit(1)
+			}
+			if err := PivotRoot(spec.FS.Rootfs); err != nil {
+				LogError("pivotroot")
+				unix.Exit(1)
+			}
+
+			os.MkdirAll("/proc", 0555)
+			os.MkdirAll("/sys", 0555)
+		} else {			
+			LogInfo("Workload: Joiner detected, skipping PivotRoot")
+		}
+		
+		if err := MountVirtualFS(spec.FS); err != nil {
+			LogError("Error MountVirtualFS")
+			unix.Exit(1)
 		}
 
 		LogInfo("Workload: Applying Capabilities isolation")
 		SetupCapabilities(spec.Capabilities)
 		//DebugMountContext()
-
-		
 
 		/*fmt.Println("[*] Apply Seccomp Profile:", profile)
 		err := ApplySeccomp(profile)
@@ -40,7 +57,7 @@ func SetupRootAndSpawnWorkload(
 		}
 
 		//fmt.Println("---[*] Workload: Run Workload")
-		
+
 		runWorkload(spec, ipc)
 
 		// If we get here, exec failed
@@ -48,6 +65,9 @@ func SetupRootAndSpawnWorkload(
 		unix.Exit(127)
 
 	} else {
+		unix.Close(ipc.Log2Sup[1])
+		unix.Close(ipc.Log2Sup[0])
+    
 
 		//fmt.Printf("Init: Fork() Container-init -> Workload\n")
 		//fmt.Printf("Init: container-init: PID=%d waiting for child PID=%d\n",os.Getpid(), pid)
@@ -57,14 +77,9 @@ func SetupRootAndSpawnWorkload(
 }
 
 func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
-	// 1. Always send workload PID
+
 	SendWorkloadPID(ipc, workloadPID)
-
-	// 2. Collect namespace FDs this container CREATED
 	handles := CollectCreatedNamespaceFDs(spec)
-	//if len(handles) == 0 { return	}
-
-	// 3. Send namespace handles to supervisor
 	SendCreatedNamespaceFDs(ipc, handles)
 
 	var status unix.WaitStatus
@@ -78,44 +93,46 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 		status,
 	)*/
 
+	// 2. ONLY the Creator/Root needs to hold the door open
+	if spec.IsNetRoot {
+		LogInfo("Init: %s Workload done, holding namespaces for joiners...", spec.ID)
+		
+		unix.Close(ipc.KeepAlive[1])		
+		WaitFd(ipc.KeepAlive[0])
+
+		LogInfo("Init: %s Released by Supervisor", spec.ID)
+	} else {
+		// Joiners can exit immediately after their workload is done
+		LogInfo("Init: %s Workload done, exiting joiner", spec.ID)
+	}
+
+	// 3. Final Exit based on the status captured BEFORE the wait
 	if status.Exited() {
-		LogWarn("Init: Exiting %s with %d\n", spec.ID, status.ExitStatus())
 		os.Exit(status.ExitStatus())
 	}
 	if status.Signaled() {
-		LogWarn("Init: Exiting %s via signal %d\n", spec.ID, status.Signal())
 		os.Exit(128 + int(status.Signal()))
 	}
-
-	LogWarn("Init: Exiting %s cleanly", spec.ID)
 	os.Exit(0)
 }
 
 func runWorkload(spec *ContainerSpec, ipc *IPC) {
-	//LogInfo("profile: %v", spec.Seccomp)
-	spec.Seccomp = ProfileIpLink	
-	
-	wspec, ok := WorkloadRegistry[spec.Seccomp]
-    if !ok { os.Exit(1) }
-
-    // Close the read end inside the child (best practice)
-    unix.Close(ipc.Log2Sup[1])
+    
+    spec.Seccomp = ProfileIpLink
+    wspec, ok := WorkloadRegistry[spec.Seccomp]
+    if !ok {
+        os.Exit(1)
+    }    
 
     cmd := exec.Command(wspec.Path, wspec.Args[1:]...)
     cmd.Env = wspec.Env
-
-    // Convert the FD to a Go *os.File for the Cmd struct
-    logFile := os.NewFile(uintptr(ipc.Log2Sup[0]), "log-socket")
     
-    cmd.Stdout = logFile
-    cmd.Stderr = logFile // Redirect both to the same socket
-
-    // Run the process
-    if err := cmd.Run(); err != nil {
-        fmt.Fprintf(logFile, "Workload execution failed: %v\n", err)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    
+    if err := cmd.Run(); err != nil {        
+        fmt.Fprintf(os.Stderr, "Workload execution failed: %v\n", err)
     }
-
-    // Explicitly close before exiting to signal EOF to Supervisor
-    logFile.Close()
+    
     os.Exit(0)
 }

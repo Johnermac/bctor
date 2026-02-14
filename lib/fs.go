@@ -117,6 +117,68 @@ func callHideProc() {
 	}
 }
 
+func DebugMountContext() {
+	fmt.Println("========== MOUNT DEBUG ==========")
+
+	// Identity
+	fmt.Println("UID:", os.Getuid())
+	fmt.Println("EUID:", os.Geteuid())
+	fmt.Println("GID:", os.Getgid())
+	fmt.Println("EGID:", os.Getegid())
+
+	// Namespace identity
+	if ns, err := os.Readlink("/proc/self/ns/mnt"); err == nil {
+		fmt.Println("Mount NS:", ns)
+	}
+	if ns, err := os.Readlink("/proc/self/ns/user"); err == nil {
+		fmt.Println("User NS:", ns)
+	}
+	if ns, err := os.Readlink("/proc/self/ns/pid"); err == nil {
+		fmt.Println("PID NS:", ns)
+	}
+
+	// UID/GID maps (important if using CLONE_NEWUSER)
+	if data, err := os.ReadFile("/proc/self/uid_map"); err == nil {
+		fmt.Println("uid_map:\n", string(data))
+	}
+	if data, err := os.ReadFile("/proc/self/gid_map"); err == nil {
+		fmt.Println("gid_map:\n", string(data))
+	}
+	if data, err := os.ReadFile("/proc/self/setgroups"); err == nil {
+		fmt.Println("setgroups:\n", string(data))
+	}
+
+	// Capabilities
+	if data, err := os.ReadFile("/proc/self/status"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, l := range lines {
+			if strings.HasPrefix(l, "CapEff") ||
+				strings.HasPrefix(l, "CapPrm") ||
+				strings.HasPrefix(l, "CapBnd") {
+				fmt.Println(l)
+			}
+		}
+	}
+
+	// Check /proc mount target
+	if fi, err := os.Stat("/proc"); err == nil {
+		fmt.Println("/proc exists, mode:", fi.Mode())
+	} else {
+		fmt.Println("/proc stat error:", err)
+	}
+
+	// Check if root is readonly
+	if data, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, " / ") {
+				fmt.Println("Root mountinfo:", line)
+			}
+		}
+	}
+
+	fmt.Println("=================================")
+}
+
 func PrepareRoot(cfg FSConfig) error {
 	// 1. Make mounts private (critical)
 	unix.Mount("", "/", "", unix.MS_REC|unix.MS_SLAVE, "")
@@ -240,84 +302,18 @@ func PivotRoot(newRoot string) error {
 	return nil
 }
 
-func DebugMountContext() {
-    fmt.Println("========== MOUNT DEBUG ==========")
-
-    // Identity
-    fmt.Println("UID:", os.Getuid())
-    fmt.Println("EUID:", os.Geteuid())
-    fmt.Println("GID:", os.Getgid())
-    fmt.Println("EGID:", os.Getegid())
-
-    // Namespace identity
-    if ns, err := os.Readlink("/proc/self/ns/mnt"); err == nil {
-        fmt.Println("Mount NS:", ns)
-    }
-    if ns, err := os.Readlink("/proc/self/ns/user"); err == nil {
-        fmt.Println("User NS:", ns)
-    }
-    if ns, err := os.Readlink("/proc/self/ns/pid"); err == nil {
-        fmt.Println("PID NS:", ns)
-    }
-
-    // UID/GID maps (important if using CLONE_NEWUSER)
-    if data, err := os.ReadFile("/proc/self/uid_map"); err == nil {
-        fmt.Println("uid_map:\n", string(data))
-    }
-    if data, err := os.ReadFile("/proc/self/gid_map"); err == nil {
-        fmt.Println("gid_map:\n", string(data))
-    }
-    if data, err := os.ReadFile("/proc/self/setgroups"); err == nil {
-        fmt.Println("setgroups:\n", string(data))
-    }
-
-    // Capabilities
-    if data, err := os.ReadFile("/proc/self/status"); err == nil {
-        lines := strings.Split(string(data), "\n")
-        for _, l := range lines {
-            if strings.HasPrefix(l, "CapEff") ||
-                strings.HasPrefix(l, "CapPrm") ||
-                strings.HasPrefix(l, "CapBnd") {
-                fmt.Println(l)
-            }
-        }
-    }
-
-    // Check /proc mount target
-    if fi, err := os.Stat("/proc"); err == nil {
-        fmt.Println("/proc exists, mode:", fi.Mode())
-    } else {
-        fmt.Println("/proc stat error:", err)
-    }
-
-    // Check if root is readonly
-    if data, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
-        for _, line := range strings.Split(string(data), "\n") {
-            if strings.Contains(line, " / ") {
-                fmt.Println("Root mountinfo:", line)
-            }
-        }
-    }
-
-    fmt.Println("=================================")
-}
-
-
 func MountVirtualFS(cfg FSConfig) error {
 
-	if cfg.Proc {				
-		
-		_ = unix.Unmount("/proc", unix.MNT_DETACH)	
-
-		if err := unix.Mount(
-			"proc",
-			"/proc",
-			"proc",
-			unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV,
-			"",
-		); err != nil	 && err != unix.EPERM {        
-        return LogError("CRITICAL: proc mount still EPERM: %v", err)
-    }
+	// Inside MountVirtualFS
+	if cfg.Proc {
+		// Try to remount to refresh the network view for this specific container
+		flags := unix.MS_REMOUNT | unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV
+		err := unix.Mount("proc", "/proc", "proc", uintptr(flags), "")
+		if err != nil {
+			// If remount fails, do the hard unmount/mount
+			_ = unix.Unmount("/proc", unix.MNT_DETACH)
+			_ = unix.Mount("proc", "/proc", "proc", 0, "")
+		}
 	}
 
 	if cfg.Sys {
@@ -327,7 +323,7 @@ func MountVirtualFS(cfg FSConfig) error {
 			"sysfs",
 			unix.MS_RDONLY|unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV,
 			"",
-		); err != nil  && err != unix.EPERM {
+		); err != nil && err != unix.EPERM {
 			return LogError("Workload: sysfs mount failed: %v", err)
 		}
 	}
@@ -365,35 +361,4 @@ func MountVirtualFS(cfg FSConfig) error {
 	}
 
 	return nil
-}
-
-func FileSystemSetup(fsCfg FSConfig) {
-	// 1. Prepare filesystem (mounts, bind, propagation)
-	if err := PrepareRoot(fsCfg); err != nil {
-		LogError("Workload: PrepareRoot failed: %v", err)
-		unix.Exit(1)
-	}
-
-	// 2. pivot_root
-	if err := PivotRoot(fsCfg.Rootfs); err != nil {
-		LogError("Workload: PivotRoot failed: %v", err)
-		unix.Exit(1)
-	}
-
-	// 3. Recreate mount points inside new root
-	err := os.MkdirAll("/proc", 0555)
-	if err != nil {
-		LogError("mkdir proc: %v", err)
-	}
-	_ = os.MkdirAll("/sys", 0555)
-	_ = os.MkdirAll("/dev", 0755)
-
-	// 4. Mount virtual filesystems
-	if err := MountVirtualFS(fsCfg); err != nil {
-		LogError("Workload: MountVirtualFS failed: %v", err)
-		unix.Exit(1)
-	}
-
-	//fmt.Printf("Workload: Calling HideProc\n")
-	callHideProc()
 }

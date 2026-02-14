@@ -46,7 +46,7 @@ func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
 
 	if count == 0 {
 		err := unix.Sendmsg(ipc.Init2Sup[1], buf, nil, nil, 0)
-    return err
+		return err
 	}
 
 	oobfds := make([]int, 0, count)
@@ -64,44 +64,54 @@ func SendCreatedNamespaceFDs(ipc *IPC, fds map[NamespaceType]int) error {
 
 // Supervisor receives created namespace FDs from init
 func RecvCreatedNamespaceFDs(ipc *IPC) (map[NamespaceType]int, error) {
-	buf := make([]byte, 256)
-	oob := make([]byte, unix.CmsgSpace(8*8))
-	//LogInfo("RecvCreatedNamespaceFDs")
-	n, oobn, _, _, err := unix.Recvmsg(ipc.Init2Sup[0], buf, oob, 0)
-	if err != nil {
-		return nil, err
-	}
+    buf := make([]byte, 256)
+    oob := make([]byte, unix.CmsgSpace(8*8))
+    
+    n, oobn, _, _, err := unix.Recvmsg(ipc.Init2Sup[0], buf, oob, 0)
+    if err != nil {
+        return nil, err
+    }
+    if n == 0 {
+        return nil, fmt.Errorf("EOF: child process exited before sending FDs")
+    }
 
-	if n == 0 {
-		return nil, nil
-	}
+    count := int(buf[0])
+    if count == 0 {
+        return make(map[NamespaceType]int), nil
+    }
 
-	count := int(buf[0])
-	if count == 0 {
-		return make(map[NamespaceType]int), nil
-	}
+    // --- SAFETY CHECK ---
+    if oobn == 0 {
+        return nil, fmt.Errorf("received %d bytes but 0 file descriptors. Child likely crashed.", n)
+    }
 
-	cmsgs, err := unix.ParseSocketControlMessage(oob[:oobn])
-	if err != nil {
-		return nil, err
-	}
+    cmsgs, err := unix.ParseSocketControlMessage(oob[:oobn])
+    if err != nil {
+        return nil, err
+    }
+    
+    // --- PREVENT PANIC HERE ---
+    if len(cmsgs) == 0 {
+        return nil, fmt.Errorf("no unix control messages found in OOB data")
+    }
 
-	fds, err := unix.ParseUnixRights(&cmsgs[0])
-	if err != nil {
-		return nil, err
-	}
+    fds, err := unix.ParseUnixRights(&cmsgs[0])
+    if err != nil {
+        return nil, err
+    }
+    // ---------------------
 
-	if len(fds) != count {
-		return nil, fmt.Errorf("fd count mismatch")
-	}
+    if len(fds) != count {
+        return nil, fmt.Errorf("fd count mismatch: expected %d, got %d", count, len(fds))
+    }
 
-	out := make(map[NamespaceType]int)
-	for i := 0; i < count; i++ {
-		ns := NamespaceType(buf[1+i])
-		out[ns] = fds[i]
-	}
+    out := make(map[NamespaceType]int)
+    for i := 0; i < count; i++ {
+        ns := NamespaceType(buf[1+i])
+        out[ns] = fds[i]
+    }
 
-	return out, nil
+    return out, nil
 }
 
 // Joining container → Supervisor: send workload PID only
@@ -130,30 +140,37 @@ func RecvWorkloadPID(ipc *IPC) int {
 // NEW > Supervisor → joiner init: send N FDs + types
 func SendNamespaceFDs(
 	ipc *IPC,
+	scx *SupervisorCtx,
 	handles map[NamespaceType]*NamespaceHandle,
 	shares []ShareSpec,
 ) error {
 
 	count := len(shares)
-	if count == 0 {
-		return nil
-	}
+	if count == 0 {	return nil }
+	scx.Mu.Lock() // LOCK: Protect the read from scx.Handles
+  from := shares[0].FromContainer
+  handles, ok := scx.Handles[from]
+  if !ok {
+    scx.Mu.Unlock()
+    return fmt.Errorf("missing namespace handle for container: %s", from)
+  }
 
 	// ---- in-band payload ----
 	buf := make([]byte, 1+count)
 	buf[0] = byte(count)
-
 	fds := make([]int, 0, count)
 
 	for i, s := range shares {
 		h, ok := handles[s.Type]
 		if !ok {
+			scx.Mu.Unlock()
 			return fmt.Errorf("missing namespace handle: %v", s.Type)
 		}
 		buf[1+i] = byte(s.Type)
 		fds = append(fds, h.FD)
 		h.Ref++
 	}
+	scx.Mu.Unlock()
 
 	// ---- out-of-band ----
 	oob := unix.UnixRights(fds...)
@@ -195,6 +212,9 @@ func RegisterNamespaceHandles(
 	containerID string,
 	fds map[NamespaceType]int,
 ) {
+	scx.Mu.Lock()         
+  defer scx.Mu.Unlock()
+
 	if scx.Handles[containerID] == nil {
 		scx.Handles[containerID] = make(map[NamespaceType]*NamespaceHandle)
 	}

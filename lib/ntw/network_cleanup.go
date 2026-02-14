@@ -28,6 +28,8 @@ func (a *IPAllocator) Release(ip net.IP) {
 	if ip == nil {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	delete(a.Used, ip.String())
 }
 

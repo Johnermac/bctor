@@ -107,11 +107,7 @@ if spec.Seccomp == ProfileHello {
 		files, _ := os.ReadDir("/bin")
 		for _, f := range files {
 			LogInfo("[%s] /bin contains: %s", spec.ID, f.Name())
-		}
-		files, _ = os.ReadDir("/proc")
-		for _, f := range files {
-			LogInfo("[%s] /proc contains: %s", spec.ID, f.Name())
-		}
+		}		
 
 		links, _ := netlink.LinkList()
 
