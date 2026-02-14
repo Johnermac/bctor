@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/Johnermac/bctor/lib"
 	"github.com/Johnermac/bctor/lib/ntw"
@@ -59,6 +60,7 @@ func main() {
 	for i := 1; i <= N; i++ {    
     ipc, _ := lib.NewIPC()
     wg.Add(1) // close on CaptureLogs
+		time.Sleep(20 * time.Millisecond)
     
     if i == 1 {
         // --- CREATOR ---
