@@ -140,7 +140,7 @@ in progress
  |  the goal here is to be able to control multiple containers
  |  not only exec, but inter-connect them in the same namespaces
  |  we let all managament centralized in the supervisor (parent)
- |  to connect in a namespace, we need to connect to the same user NS first
+ |  to connect in a namespace, we need to connect to the same user NS first (cause of permission)
  |  And for that, we need to send info from a container to another
  |  but its not so easy, they are difference processes that close when their job is finished
  |  the shared conn of NS can't depend on the availability of containers
@@ -151,20 +151,41 @@ in progress
  |  cause sometimes the child needs approval to continue to something, but that approval has a right time for it to happen.
  |  the correct sequence of actions here I think its the most important thing for the whole process to work and not break
  └─ MORE
+
+ [*] A choice of architecture here was to keep the container-1 (creator) alive, until all containers-N (joiners) have finish their commands/services or whatever.
+ [*] We are doing a K8s pod style separation. Cause all containers share the same network and mount.
+ [*] the container-1 will create bridge access, veth pairs and do IP allocation. The containers-N will just join and use the same resource. If they need to expose a service, or connect to intern, they use eth0 from Container-1.
+ [!] IMPORTANT: the "ip addr show" command for example, uses /proc directory to get the interfaces information. If the containers are not in the same MOUNT namespace OR they container-1 closes. They wont have access to the /proc anymore. Which will break a lot of commands
+ [>] thats why the container-1 must be the last one to go
+
+ [*] So now we have 3 goroutines (concurrencies) :
+   - LOG management (all output goes here through pipe)
+   - LIFECYCLE of containers (creation and termination)
+   - REAPER (releasing and cleaning)
+ [*] For that we had to implement Channels, waitGroups and Mutexes ... (That was a pain to do it, race conditions everywhere)
+
+ NEXT STEP: In progress
+
+ We are getting information from containers (OUTPUT)
+ Now we need to send information/execute commands (INPUT)
+
+Im gonna write more details in my next post
 ```
 
 --- todo ---
 
 ```go
 - add cfg namespaces as parameters
-- fix bugs in caps and file system
+[x] fix bugs in caps and file system
 - finish file system ReadOnly
 - fix mount of proc and sys (have no idea how to do that, I think its a limitation of WSL)
 - remove comments 
-- improve output of diffs for better readability
-- in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping
-- use socket in the future instead of pipe
+[x] improve output of diffs for better readability
+[x] in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping
+[x] use socket in the future instead of pipe (im using both actually :D )
 - implement PTY attach to control multiples containers
-- improve folders layout
+[x] improve folders layout - (there is always room from improvement in layout)
 - add workloads and more profiles to seccomp
+[x] implement OUTPUT with concurrency architecture
+- implement INPUT over a CLI in supervisor
 ```
