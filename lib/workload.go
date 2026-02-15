@@ -3,24 +3,66 @@ package lib
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	"golang.org/x/sys/unix"
 )
+
+func setupBatchIO(ipc *IPC) {
+	// Redirect stdout/stderr to pipe
+	unix.Dup2(ipc.Log2Sup[1], 1)
+	unix.Dup2(ipc.Log2Sup[1], 2)
+
+	// Close unused ends
+	unix.Close(ipc.Log2Sup[0])
+	unix.Close(ipc.Log2Sup[1])
+}
+
+func setupInteractiveIO(ipc *IPC) {
+	sFd := int(ipc.PtySlave.Fd())
+	mFd := int(ipc.PtyMaster.Fd())
+
+	// New session and controlling TTY for interactive shell.
+	_, _ = unix.Setsid()
+	_ = unix.IoctlSetPointerInt(sFd, unix.TIOCSCTTY, 0)
+
+	_ = unix.Dup2(sFd, 0)
+	_ = unix.Dup2(sFd, 1)
+	_ = unix.Dup2(sFd, 2)
+
+	unix.SetNonblock(0, false)
+	unix.SetNonblock(1, false)
+	unix.SetNonblock(2, false)
+
+	// Close originals
+	if mFd > 2 {
+		unix.Close(mFd)
+	}
+	if sFd > 2 {
+		unix.Close(sFd)
+	}
+}
+
+func setupIO(spec *ContainerSpec, ipc *IPC) {
+	switch spec.Workload.Mode {
+	case ModeInteractive:
+		setupInteractiveIO(ipc)
+	case ModeBatch:
+		setupBatchIO(ipc)
+	}
+}
 
 func SetupRootAndSpawnWorkload(
 	spec *ContainerSpec,
 	pid uintptr,
 	ipc *IPC) {
 
-	if pid == 0 {		  
-    unix.Dup2(ipc.Log2Sup[1], 1) // Redirect Stdout
-    unix.Dup2(ipc.Log2Sup[1], 2) // Redirect Stderr
-   
-    unix.Close(ipc.Log2Sup[0])
-    unix.Close(ipc.Log2Sup[1])
+	if pid == 0 {
 
-		if spec.Namespaces.MOUNT {			
+		// SETUP IO BY MODE
+		//fmt.Printf("MODE: %v\n", spec.Workload.Mode)
+		setupIO(spec, ipc)
+
+		if spec.Namespaces.MOUNT && !specJoinsNamespace(spec, NSMnt) {
 			if err := PrepareRoot(spec.FS); err != nil {
 				LogError("prepare")
 				unix.Exit(1)
@@ -32,24 +74,22 @@ func SetupRootAndSpawnWorkload(
 
 			os.MkdirAll("/proc", 0555)
 			os.MkdirAll("/sys", 0555)
-		} else {			
-			LogInfo("Workload: Joiner detected, skipping PivotRoot")
+		} else {
+			LogInfo("Workload: mount setup already shared, skipping rootfs/pivot setup")
 		}
-		
-		if err := MountVirtualFS(spec.FS); err != nil {
-			LogError("Error MountVirtualFS")
-			unix.Exit(1)
+
+		if spec.Namespaces.MOUNT && !specJoinsNamespace(spec, NSMnt) {
+			if err := MountVirtualFS(spec.FS); err != nil {
+				LogError("Error MountVirtualFS")
+				unix.Exit(1)
+			}
 		}
 
 		LogInfo("Workload: Applying Capabilities isolation")
 		SetupCapabilities(spec.Capabilities)
 		//DebugMountContext()
 
-		/*fmt.Println("[*] Apply Seccomp Profile:", profile)
-		err := ApplySeccomp(profile)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
-		}*/
+		// SECCOMP
 
 		if spec.IsNetRoot {
 			//LogInfo("PAUSE")
@@ -58,7 +98,7 @@ func SetupRootAndSpawnWorkload(
 
 		//fmt.Println("---[*] Workload: Run Workload")
 
-		runWorkload(spec, ipc)
+		runWorkload(spec)
 
 		// If we get here, exec failed
 		LogError("Workload: Returned unexpectedly")
@@ -67,12 +107,31 @@ func SetupRootAndSpawnWorkload(
 	} else {
 		unix.Close(ipc.Log2Sup[1])
 		unix.Close(ipc.Log2Sup[0])
-    
 
-		//fmt.Printf("Init: Fork() Container-init -> Workload\n")
-		//fmt.Printf("Init: container-init: PID=%d waiting for child PID=%d\n",os.Getpid(), pid)
 		// notify supervisor of workload PID
 		initWorkloadHandling(spec, int(pid), ipc)
+	}
+}
+
+func runWorkload(spec *ContainerSpec) {
+	profile := spec.Seccomp
+	if _, ok := WorkloadRegistry[profile]; !ok {
+		if spec.Workload.Mode == ModeBatch {
+			profile = ProfileIpLink
+		} else {
+			profile = ProfileDebugShell
+		}
+	}
+
+	wspec, ok := WorkloadRegistry[profile]
+	if !ok {
+		unix.Exit(1)
+	}
+
+	// Exec replaces current process
+	if err := unix.Exec(wspec.Path, wspec.Args, wspec.Env); err != nil {
+		fmt.Fprintf(os.Stderr, "exec failed: %v\n", err)
+		unix.Exit(127)
 	}
 }
 
@@ -96,8 +155,8 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	// 2. ONLY the Creator/Root needs to hold the door open
 	if spec.IsNetRoot {
 		LogInfo("Init: %s Workload done, holding namespaces for joiners...", spec.ID)
-		
-		unix.Close(ipc.KeepAlive[1])		
+
+		unix.Close(ipc.KeepAlive[1])
 		WaitFd(ipc.KeepAlive[0])
 
 		LogInfo("Init: %s Released by Supervisor", spec.ID)
@@ -116,23 +175,11 @@ func initWorkloadHandling(spec *ContainerSpec, workloadPID int, ipc *IPC) {
 	os.Exit(0)
 }
 
-func runWorkload(spec *ContainerSpec, ipc *IPC) {
-    
-    spec.Seccomp = ProfileIpLink
-    wspec, ok := WorkloadRegistry[spec.Seccomp]
-    if !ok {
-        os.Exit(1)
-    }    
-
-    cmd := exec.Command(wspec.Path, wspec.Args[1:]...)
-    cmd.Env = wspec.Env
-    
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-    
-    if err := cmd.Run(); err != nil {        
-        fmt.Fprintf(os.Stderr, "Workload execution failed: %v\n", err)
-    }
-    
-    os.Exit(0)
+func specJoinsNamespace(spec *ContainerSpec, ns NamespaceType) bool {
+	for _, s := range spec.Shares {
+		if s.Type == ns {
+			return true
+		}
+	}
+	return false
 }

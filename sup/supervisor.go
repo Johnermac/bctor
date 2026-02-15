@@ -31,7 +31,7 @@ type Container struct {
 }
 
 func StartContainer(
-	spec *lib.ContainerSpec,	
+	spec *lib.ContainerSpec,
 	logChan chan<- lib.LogMsg,
 	scx *lib.SupervisorCtx,
 	containers map[string]*Container,
@@ -40,7 +40,6 @@ func StartContainer(
 ) (*Container, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	
 
 	var err error
 	ChildPID, err := lib.NewFork()
@@ -98,16 +97,15 @@ func StartContainer(
 func FinalizeContainer(
 	scx *lib.SupervisorCtx,
 	logChan chan<- lib.LogMsg,
-	ChildPID uintptr,	
+	ChildPID uintptr,
 	spec *lib.ContainerSpec,
 	containers map[string]*Container,
 	ipc *lib.IPC,
 	wg *sync.WaitGroup,
-) *Container {	
+) *Container {
 
 	// LOG SETUP
-	go lib.CaptureLogs(spec.ID, ipc.Log2Sup[0],ipc.Log2Sup[1], logChan, wg)    
-  
+	//go lib.CaptureLogs(spec.ID, ipc.Log2Sup[0],ipc.Log2Sup[1], spec.Workload.Mode,  logChan, wg)
 
 	workloadPID := lib.RecvWorkloadPID(ipc)
 	//fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
@@ -116,12 +114,11 @@ func FinalizeContainer(
 	if createsAnyNamespace(spec) || len(spec.Shares) > 0 {
 		//lib.LogInfo("Supervisor: Waiting for CreatedNamespaceFDs from %s", spec.ID)
 		fds, err := lib.RecvCreatedNamespaceFDs(ipc)
-		if err == nil {			
-			lib.RegisterNamespaceHandles(scx, spec.ID, fds)			
+		if err == nil {
+			lib.RegisterNamespaceHandles(scx, spec.ID, fds)
 			created = fds
 		}
 	}
-	
 
 	var netres *ntw.NetResources
 
@@ -138,7 +135,7 @@ func FinalizeContainer(
 	}
 
 	//fmt.Printf("[>] Supervisor: Container %s created workload PID=%d\n", spec.ID, workloadPID)
-	
+
 	handles := make(map[lib.NamespaceType]*lib.NamespaceHandle)
 	for ns, fd := range created {
 		handles[ns] = &lib.NamespaceHandle{
@@ -146,8 +143,8 @@ func FinalizeContainer(
 			FD:   fd,
 			Ref:  1,
 		}
-	}		
-	
+	}
+
 	c := &Container{
 		Spec:        spec,
 		InitPID:     int(ChildPID),
@@ -162,9 +159,9 @@ func FinalizeContainer(
 	scx.Mu.Unlock()
 
 	unix.Close(ipc.Init2Sup[0])
-	unix.Close(ipc.Sup2Init[0])	
+	unix.Close(ipc.Sup2Init[0])
 
-	lib.LogWarn("Container %s finalized (PID: %d)", spec.ID, workloadPID)
+	//lib.LogWarn("Container %s finalized (PID: %d)", spec.ID, workloadPID)
 	return c
 }
 

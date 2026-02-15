@@ -120,3 +120,12 @@ if spec.Seccomp == ProfileHello {
 		os.Exit(0)
 	}
 	```
+
+add seccomp later:
+```go
+fmt.Println("[*] Apply Seccomp Profile:", profile)
+	err := ApplySeccomp(profile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ApplySeccomp failed:", err)
+	}
+```

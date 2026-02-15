@@ -19,6 +19,7 @@ func OnContainerExit(
 ) {
 	defer wg.Done()
 	processedExits := 0
+	rootReleased := false
 	fmt.Println("[!] Supervisor running")
 
 	for {
@@ -45,6 +46,17 @@ func OnContainerExit(
 				continue
 			}
 
+			// Single-container mode: release root as soon as its workload exits,
+			// otherwise init stays blocked on KeepAlive and never reaches reaper teardown.
+			if !rootReleased &&
+				containerCount == 1 &&
+				c.Spec.IsNetRoot &&
+				ev.PID == c.WorkloadPID {
+				lib.LogInfo("Reaper: Releasing root %s", c.Spec.ID)
+				lib.FreeFd(c.IPC.KeepAlive[1])
+				rootReleased = true
+			}
+
 			// If it's the init process exiting, we teardown
 			if ev.PID == c.InitPID {
 				processedExits++
@@ -68,16 +80,17 @@ func OnContainerExit(
 				}
 
 				delete(containers, c.Spec.ID)
-				
+
 				// Signal main.go that one container is fully finished
-				//wg.Done() 
+				//wg.Done()
 
 				// Release the Root if it's the only one left and it's just waiting
-				if len(containers) == 1 && processedExits >= (containerCount-1){
+				if !rootReleased && len(containers) == 1 && processedExits >= (containerCount-1) {
 					for _, res := range containers {
 						if res.Spec.IsNetRoot {
 							lib.LogInfo("Reaper: Releasing root %s", res.Spec.ID)
 							lib.FreeFd(res.IPC.KeepAlive[1])
+							rootReleased = true
 							break
 						}
 					}

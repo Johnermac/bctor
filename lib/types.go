@@ -30,12 +30,12 @@ type IPManager interface {
 type SupervisorCtx struct {
 	ParentNS *NamespaceState
 	Handles  map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
-	
-	IPAlloc  IPManager
+
+	IPAlloc IPManager
 	//ChildPID uintptr // init pid
 	//WorkPID  uintptr // workload pid
-	Subnet   *net.IPNet
-	Mu       sync.Mutex
+	Subnet *net.IPNet
+	Mu     sync.Mutex
 }
 
 // namespaces
@@ -63,10 +63,18 @@ type NamespaceHandle struct {
 	Ref  int // supervisor-owned refcount
 }
 
+type ExecutionMode int
+
+const (
+	ModeInteractive ExecutionMode = iota
+	ModeBatch
+)
+
 type WorkloadSpec struct {
-	Path string // absolute inside container (/bin/sh, /bin/nc, etc)
+	Path string
 	Args []string
 	Env  []string
+	Mode ExecutionMode
 }
 
 var WorkloadRegistry = map[Profile]WorkloadSpec{
@@ -78,25 +86,29 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 			"TERM=xterm-256color",
 			"HOME=/root",
 		},
+		Mode: ModeInteractive,
 	},
 	ProfileWorkload: {
 		Path: "/bin/nc",
 		Args: []string{"nc", "-lp", "80"},
 		Env:  []string{"PATH=/bin:/usr/bin"},
+		Mode: ModeBatch,
 	},
 	ProfileIpLink: {
 		Path: "/bin/ip",
 		Args: []string{"ip", "addr", "show"},
 		Env:  []string{"PATH=/bin:/sbin:/usr/bin"},
+		Mode: ModeBatch,
 	},
 	ProfileLs: {
 		Path: "/bin/ls",
 		Args: []string{"ls", "/sys/class/net"},
 		Env:  []string{"PATH=/bin:/usr/bin"},
+		Mode: ModeBatch,
 	},
 }
 
-func DefaultShellSpec() *ContainerSpec {
+func DefaultSpec() *ContainerSpec {
 	spec := &ContainerSpec{}
 	spec.Namespaces = NamespaceConfig{
 		USER:   true, //almost everything needs this enabled
