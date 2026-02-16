@@ -195,7 +195,7 @@ func (m *Multiplexer) Dispatch(input string) {
 	case strings.HasPrefix(input, ":"):
 		m.d_exec(input)
 	case strings.HasPrefix(input, "attach "):
-		m.d_attach(input)
+		m.d_attach(input)	
 	default:
 		fmt.Printf("\r\n[-] Unknown command: %s\r\n", input)
 		m.RefreshPrompt()
@@ -249,7 +249,62 @@ func (m *Multiplexer) d_exec(input string) {
 		return
 	}
 
-	targetID, cmd := parts[0], strings.TrimSpace(parts[1])
+	targetID, cmd := parts[0], strings.TrimSpace(parts[1])	
+	//fmt.Printf("parts: %v\n", parts)	
+
+	// BROADCAST COMMAND
+	if targetID == "*" {    
+    m.mu.Lock()
+    targetsCopy := make(map[string]*Target, len(m.targets))
+    for id, t := range m.targets {
+        targetsCopy[id] = t
+    }
+    m.mu.Unlock()
+
+    for id, target := range targetsCopy {
+        m.execOne(id, target, cmd)
+    }
+
+    // restore prompt
+		m.mu.Lock()
+		if m.activeID == "" {
+			fmt.Print("\rbctor ❯ ")
+		}
+		m.mu.Unlock()
+
+		return
+
+	}
+
+	// ALL EXCEPT 
+	if strings.HasPrefix(targetID, "!") {		
+		allExcept := strings.TrimPrefix(targetID, "!")	
+				
+		m.mu.Lock()
+    targetsCopy := make(map[string]*Target, len(m.targets)-1)
+    for id, t := range m.targets {
+				if id == "bctor-c"+allExcept {
+					continue
+				}
+        targetsCopy[id] = t
+    }
+    m.mu.Unlock()
+
+    for id, target := range targetsCopy {
+        m.execOne(id, target, cmd)
+    }
+
+    // restore prompt
+		m.mu.Lock()
+		if m.activeID == "" {
+			fmt.Print("\rbctor ❯ ")
+		}
+		m.mu.Unlock()
+
+		return
+	}
+
+	// ONE TARGET COMMAND
 	if !strings.HasPrefix(targetID, "bctor-") {
 		targetID = "bctor-c" + targetID
 	}
@@ -259,58 +314,59 @@ func (m *Multiplexer) d_exec(input string) {
 	m.mu.Unlock()
 
 	if !ok {
-		fmt.Printf("\r\n[-] Unknown container: %s\r\n", targetID)
-		return
+			fmt.Printf("\r\n[-] Unknown container: %s\r\n", targetID)
+			return
 	}
 
-	execCmd := exec.Command("nsenter", "-t", strconv.Itoa(target.PID), "-m", "-u", "-i", "-n", "-p", "sh", "-c", cmd)
-	out, _ := execCmd.CombinedOutput()
+	m.execOne(targetID, target, cmd)
 
-	// 1. Clear prompt and prepare
-	fmt.Print("\r\x1b[K")
-
-	title := fmt.Sprintf("EXEC: %s (PID: %d)", targetID, target.PID)
-	
-	// 2. Header Rows - Note the leading \r on every line
-	fmt.Printf("\r%s┌──────────────────────────────────────────────────┐%s\r\n", Cyan, Reset)
-	fmt.Printf("\r%s│ %-48s │%s\r\n", Cyan, title, Reset)
-	fmt.Printf("\r%s├──────────────────────────────────────────────────┤%s\r\n", Cyan, Reset)
-
-	// 3. Process Content
-	outputStr := string(out)
-	// Split by any newline (\n or \r\n)
-	lines := strings.Split(outputStr, "\n")
-	
-	hasOutput := false
-	for _, line := range lines {
-		// Clean up the line: remove \r and any trailing whitespace
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		hasOutput = true
-		
-		// Truncate if too long for the box
-		if len(line) > 48 {
-			line = line[:45] + "..."
-		}
-		
-		// \r at the start forces cursor to left margin
-		// \r\n at the end moves to next line
-		fmt.Printf("\r%s│%s %-48s %s│%s\r\n", Cyan, Reset, line, Cyan, Reset)
-	}
-
-	if !hasOutput {
-		fmt.Printf("\r%s│ %-48s │%s\r\n", Cyan, "(no output)", Reset)
-	}
-
-	// 4. Footer Row
-	fmt.Printf("\r%s└──────────────────────────────────────────────────┘%s\r\n", Cyan, Reset)
-
-	// 5. Restore prompt if not attached
+	// restore prompt
 	m.mu.Lock()
 	if m.activeID == "" {
 		fmt.Print("\rbctor ❯ ")
 	}
 	m.mu.Unlock()
+}
+
+func (m *Multiplexer) execOne(targetID string, target *Target, cmd string) {
+    execCmd := exec.Command(
+        "nsenter",
+        "-t", strconv.Itoa(target.PID),
+        "-m", "-u", "-i", "-n", "-p",
+        "sh", "-c", cmd,
+    )
+
+    out, _ := execCmd.CombinedOutput()
+
+    fmt.Print("\r\x1b[K")
+
+    title := fmt.Sprintf("EXEC: %s (PID: %d)", targetID, target.PID)
+
+    fmt.Printf("\r%s┌──────────────────────────────────────────────────┐%s\r\n", Cyan, Reset)
+    fmt.Printf("\r%s│ %-48s │%s\r\n", Cyan, title, Reset)
+    fmt.Printf("\r%s├──────────────────────────────────────────────────┤%s\r\n", Cyan, Reset)
+
+    outputStr := string(out)
+    lines := strings.Split(outputStr, "\n")
+
+    hasOutput := false
+    for _, line := range lines {
+        line = strings.TrimSpace(line)
+        if line == "" {
+            continue
+        }
+        hasOutput = true
+
+        if len(line) > 48 {
+            line = line[:45] + "..."
+        }
+
+        fmt.Printf("\r%s│%s %-48s %s│%s\r\n", Cyan, Reset, line, Cyan, Reset)
+    }
+
+    if !hasOutput {
+        fmt.Printf("\r%s│ %-48s │%s\r\n", Cyan, "(no output)", Reset)
+    }
+
+    fmt.Printf("\r%s└──────────────────────────────────────────────────┘%s\r\n", Cyan, Reset)
 }
