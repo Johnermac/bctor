@@ -9,12 +9,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var spec lib.ContainerSpec
-
 type ContainerState int
 
 const (
 	ContainerCreated ContainerState = iota
+	ContainerInitializing
 	ContainerRunning
 	ContainerStopped
 	ContainerExited

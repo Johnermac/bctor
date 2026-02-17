@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -87,23 +88,24 @@ func LogError(format string, a ...interface{}) error {
 	return fmt.Errorf(msg)
 }
 
+type MuxLogger interface {
+	GetActiveID() string
+	RefreshPrompt()
+}
+
 func StartGlobalLogger(
 	logChan chan LogMsg,
 	done chan bool,
-	mtx *Multiplexer,
+	mtx MuxLogger,
 ) {
 	go func() {
 
 		buffers := make(map[string][]string)
 
 		for msg := range logChan {
-
 			isAttached := mtx.GetActiveID() == msg.ContainerID
-
 			switch msg.Type {
-
 			case TypeContainer:
-
 				// ----- BATCH HEADER -----
 				if msg.IsHeader {
 					buffers[msg.ContainerID] = []string{}
@@ -115,30 +117,12 @@ func StartGlobalLogger(
 					lines := buffers[msg.ContainerID]
 					delete(buffers, msg.ContainerID)
 
-					fmt.Print("\r\x1b[K")
-
-					fmt.Printf("%s┌──────────────────────────────────────────────────┐%s\r\n", Cyan, Reset)
-					fmt.Printf("%s│ EXEC: %-42s │%s\r\n", Cyan, msg.ContainerID, Reset)
-					fmt.Printf("%s├──────────────────────────────────────────────────┤%s\r\n", Cyan, Reset)
-
-					if len(lines) == 0 {
-						fmt.Printf("%s│ %-48s │%s\r\n", Cyan, "(no output)", Reset)
-					}
-
-					for _, line := range lines {
-						if len(line) > 48 {
-							line = line[:45] + "..."
-						}
-						fmt.Printf("%s│%s %-48s %s│%s\r\n",
-							Cyan, Reset, line, Cyan, Reset)
-					}
-
-					fmt.Printf("%s└──────────────────────────────────────────────────┘%s\r\n", Cyan, Reset)
+					title := fmt.Sprintf("EXEC: %s", msg.ContainerID)
+					DrawBox(title, lines)
 
 					if mtx.GetActiveID() == "" {
 						mtx.RefreshPrompt()
 					}
-
 					continue
 				}
 
@@ -244,4 +228,53 @@ func CaptureLogs(
 	if mode == ModeBatch {
 		logChan <- LogMsg{ContainerID: id, Type: TypeContainer, IsFooter: true}
 	}
+}
+
+func DrawBox(title string, lines []string) {
+	const innerWidth = 70
+
+	fmt.Print("\r\x1b[K")
+
+	hline := strings.Repeat("─", innerWidth+2)
+
+	fmt.Printf("\r%s┌%s┐%s\r\n", Cyan, hline, Reset)
+	fmt.Printf("\r%s│ %-*s │%s\r\n", Cyan, innerWidth, stripANSI(title), Reset)
+	fmt.Printf("\r%s├%s┤%s\r\n", Cyan, hline, Reset)
+
+	if len(lines) == 0 {
+		fmt.Printf("\r%s│ %-*s │%s\r\n", Cyan, innerWidth, "(no data)", Reset)
+	} else {
+		for _, line := range lines {
+
+			clean := strings.ReplaceAll(line, "\r", "")
+			visible := stripANSI(clean)
+
+			// truncate using visible length but preserve ANSI in output
+			if len(visible) > innerWidth {
+				visible = visible[:innerWidth-3] + "..."
+				clean = visible // fallback: drop colors on truncated lines (safe + simple)
+			}
+
+			padding := innerWidth - len(visible)
+			if padding < 0 {
+				padding = 0
+			}
+
+			fmt.Printf("\r%s│%s %s%s %s│%s\r\n",
+				Cyan,
+				Reset,
+				clean,
+				strings.Repeat(" ", padding),
+				Cyan,
+				Reset,
+			)
+		}
+	}
+
+	fmt.Printf("\r%s└%s┘%s\r\n", Cyan, hline, Reset)
+}
+
+func stripANSI(s string) string {
+	ansi := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansi.ReplaceAllString(s, "")
 }

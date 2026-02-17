@@ -168,6 +168,13 @@ in progress
 
  We are getting information from containers (OUTPUT)
  Now we need to send information/execute commands (INPUT)
+ 
+ Ive tried to do the INPUT part with PIPE, and failed miserably, 
+ so I decided to separate in two modes (batch and interactive)
+ BATCH - are the workloads of execution, it will just execute something and end. This will use OUTPUT only so we maintain as LOG management the return value
+ Interactive - its when you need to execute commands (basically a shell). This will use PTY
+
+ [!] it worked fine like this, next step is to implement the management of PODs
 
 Im gonna write more details in my next post
 ```

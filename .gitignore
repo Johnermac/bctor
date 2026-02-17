@@ -1,3 +1,5 @@
-bctor
+*bctor
+*.o
+*.a
 /data
 .env

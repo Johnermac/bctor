@@ -32,10 +32,8 @@ type SupervisorCtx struct {
 	Handles  map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
 
 	IPAlloc IPManager
-	//ChildPID uintptr // init pid
-	//WorkPID  uintptr // workload pid
-	Subnet *net.IPNet
-	Mu     sync.Mutex
+	Subnet  *net.IPNet
+	Mu      sync.Mutex
 }
 
 // namespaces

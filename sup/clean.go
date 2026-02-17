@@ -20,7 +20,8 @@ func OnContainerExit(
 	defer wg.Done()
 	processedExits := 0
 	rootReleased := false
-	fmt.Println("[!] Supervisor running")
+	lib.LogInfo("Bctor Supervisor is ready. Type 'new' to create a Pod.")
+	fmt.Printf("\r\x1b[Kbctor ❯ ")
 
 	for {
 		ev, ok := <-events
@@ -80,9 +81,6 @@ func OnContainerExit(
 				}
 
 				delete(containers, c.Spec.ID)
-
-				// Signal main.go that one container is fully finished
-				//wg.Done()
 
 				// Release the Root if it's the only one left and it's just waiting
 				if !rootReleased && len(containers) == 1 && processedExits >= (containerCount-1) {

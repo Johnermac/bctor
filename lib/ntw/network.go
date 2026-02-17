@@ -129,7 +129,7 @@ func (a *IPAllocator) Allocate() (net.IP, error) {
 		}
 	}
 
-	return nil, lib.LogError("no available IPs")
+	return nil, fmt.Errorf("no available IPs in subnet %s", a.Subnet.String())
 }
 
 // Helper para gerar sufixo aleatório hexadecimal
