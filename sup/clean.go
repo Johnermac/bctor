@@ -18,7 +18,7 @@ func OnContainerExit(
 	containerCount int,
 ) {
 	defer wg.Done()
-	processedExits := 0	
+	processedExits := 0
 	lib.LogInfo("Bctor Supervisor is ready. Type 'new' to create a Pod.")
 	fmt.Printf("\r\x1b[Kbctor ❯ ")
 
@@ -48,12 +48,12 @@ func OnContainerExit(
 
 			// cleanup workload
 			if ev.PID == c.WorkloadPID {
-        lib.LogInfo("Reaper: Workload for %s exited. Killing Init...", c.Spec.ID)
-        
-        // Break the KeepAlive pipe to let Init die naturally
-        if len(c.IPC.KeepAlive) > 1 {
-             lib.FreeFd(c.IPC.KeepAlive[1]) 
-        }
+				lib.LogInfo("Reaper: Workload for %s exited. Killing Init...", c.Spec.ID)
+
+				// Break the KeepAlive pipe to let Init die naturally
+				if len(c.IPC.KeepAlive) > 1 {
+					lib.FreeFd(c.IPC.KeepAlive[1])
+				}
 			}
 
 			// cleanup init
@@ -85,13 +85,13 @@ func OnContainerExit(
 					for _, res := range containers {
 						if res.Spec.IsNetRoot {
 							lib.LogInfo("Reaper: Releasing root %s", res.Spec.ID)
-							lib.FreeFd(res.IPC.KeepAlive[1])							
+							lib.FreeFd(res.IPC.KeepAlive[1])
 							break
 						}
 					}
-				}				
+				}
 			}
-			scx.Mu.Unlock()			
+			scx.Mu.Unlock()
 		}
 	}
 }

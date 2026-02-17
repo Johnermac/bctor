@@ -12,7 +12,7 @@ type Profile int
 
 const (
 	ProfileDebugShell    Profile = iota // busybox /bin/sh
-	ProfileBatch												// batch commands
+	ProfileBatch                        // batch commands
 	ProfileWorkload                     // open port with nc
 	ProfileHello                        // minimal hello-world
 	ProfileIpLink                       // ip link show (requires NET_ADMIN)

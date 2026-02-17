@@ -103,9 +103,6 @@ func FinalizeContainer(
 	wg *sync.WaitGroup,
 ) *Container {
 
-	// LOG SETUP
-	//go lib.CaptureLogs(spec.ID, ipc.Log2Sup[0],ipc.Log2Sup[1], spec.Workload.Mode,  logChan, wg)
-
 	workloadPID := lib.RecvWorkloadPID(ipc)
 	//fmt.Printf("[>] Supervisor: received workload PID=%d from container-init\n", workloadPID)
 

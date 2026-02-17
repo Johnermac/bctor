@@ -128,6 +128,17 @@ func runWorkload(spec *ContainerSpec) {
 		unix.Exit(1)
 	}
 
+	// Allow runtime command overrides (e.g. supervisor "run <pod> <cmd>").
+	if spec.Workload.Path != "" {
+		wspec.Path = spec.Workload.Path
+	}
+	if len(spec.Workload.Args) > 0 {
+		wspec.Args = spec.Workload.Args
+	}
+	if len(spec.Workload.Env) > 0 {
+		wspec.Env = spec.Workload.Env
+	}
+
 	// Exec replaces current process
 	if err := unix.Exec(wspec.Path, wspec.Args, wspec.Env); err != nil {
 		fmt.Fprintf(os.Stderr, "exec failed: %v\n", err)

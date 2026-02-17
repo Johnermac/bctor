@@ -87,14 +87,14 @@ var WorkloadRegistry = map[Profile]WorkloadSpec{
 		Mode: ModeInteractive,
 	},
 	ProfileBatch: {
-			Path: "/bin/sh",
-			Args: []string{"sh", "-c", "id"}, // Args will be overridden at runtime
-			Env: []string{
-					"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-					"HOME=/root",
-			},
-			Mode: ModeBatch,
-	},	
+		Path: "/bin/sh",
+		Args: []string{"sh", "-c", "id"}, // Args will be overridden at runtime
+		Env: []string{
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"HOME=/root",
+		},
+		Mode: ModeBatch,
+	},
 	ProfileWorkload: {
 		Path: "/bin/nc",
 		Args: []string{"nc", "-lp", "80"},

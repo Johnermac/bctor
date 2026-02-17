@@ -99,47 +99,27 @@ func StartGlobalLogger(
 	mtx MuxLogger,
 ) {
 	go func() {
-
-		buffers := make(map[string][]string)
-
 		for msg := range logChan {
 			isAttached := mtx.GetActiveID() == msg.ContainerID
 			switch msg.Type {
 			case TypeContainer:
-				// We don't need IsHeader/IsFooter if we want live streaming
+				// Batch markers are ignored in live streaming mode.
 				if msg.IsHeader || msg.IsFooter {
-						continue 
-				}
-
-				if isAttached {
-						os.Stdout.Write([]byte(msg.Data))
-				} else {
-						// This gives you live, prefixed output for batch commands
-						fmt.Printf("\r\x1b[K%s[%s]%s %s\r\n", 
-								Cyan, msg.ContainerID, Reset, msg.Data)
-						
-						if mtx.GetActiveID() == "" {
-								mtx.RefreshPrompt()
-						}
-				}
-
-				// ----- BATCH BUFFERING -----
-				if _, isBatch := buffers[msg.ContainerID]; isBatch {
-					clean := strings.TrimRight(msg.Data, "\r")
-					buffers[msg.ContainerID] = append(buffers[msg.ContainerID], clean)
 					continue
 				}
 
-				// ----- INTERACTIVE -----
 				if isAttached {
-					// raw passthrough
 					os.Stdout.Write([]byte(msg.Data))
 				} else {
-					// supervisor prefixed output
-					fmt.Printf("\r\x1b[K%s[%s]%s %s\r\n",
-						Cyan, msg.ContainerID, Reset, msg.Data)
+					fmt.Print("\r\x1b[K")
+					fmt.Printf("%s %s %s\r\n",
+						"\x1b[0m",
+						"\x1b[36m\x1b[1m│\x1b[0m",
+						msg.Data)
 
-					mtx.RefreshPrompt()
+					if mtx.GetActiveID() == "" {
+						mtx.RefreshPrompt()
+					}
 				}
 
 			default:
