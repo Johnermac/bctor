@@ -38,6 +38,9 @@ func (m *Multiplexer) Dispatch(input string) {
 	strings.HasPrefix(input, "new ") || 
 	strings.HasPrefix(input, "n ") :
 		m.d_new(input)
+	case strings.HasPrefix(input, "run ") || 
+	strings.HasPrefix(input, "r ") :
+		m.d_run(input)
 	case strings.HasPrefix(input, "kill ") || strings.HasPrefix(input, "k "):	
 		m.d_kill(input)
 	case input == "clear" || input ==  "cls" || input == "c":
@@ -52,6 +55,76 @@ func (m *Multiplexer) Dispatch(input string) {
 	}
 }
 
+// "run a ping 8.8.8.8" -> ["run", "a", "ping", "8.8.8.8"]
+func (m *Multiplexer) d_run(input string) {
+    lines := []string{}
+    parts := strings.Fields(input) 
+
+    if len(parts) < 2 {
+        lines = append(lines, "Usage: run <pod> <cmd>  OR  run <cmd>")
+        lib.DrawBox("BATCH RUN", lines)
+        return
+    }
+
+    var letter string
+    var cmdParts []string
+    var isJoiner bool
+
+    // Check if parts[1] is a pod letter (e.g., "a") or the start of a command
+    if len(parts[1]) == 1 && (parts[1][0] >= 'a' && parts[1][0] <= 'z') {
+        letter = parts[1]
+        cmdParts = parts[2:]
+        isJoiner = true
+    } else {
+        // Run in a brand new pod
+        newLetter, _ := m.state.GetNextPodLetter()
+        letter = newLetter
+        cmdParts = parts[1:]
+        isJoiner = false
+    }
+
+    if len(cmdParts) == 0 {
+        lines = append(lines, "[-] Error: No command specified")
+        lib.DrawBox("BATCH RUN", lines)
+        return
+    }
+
+    fullCmd := strings.Join(cmdParts, " ")
+    ipc, _ := lib.NewIPC()
+
+    if isJoiner {
+        // JOINER BATCH
+        m.state.mtx.mu.Lock()
+        rootID := fmt.Sprintf("bctor-%s1", letter)
+        root, exists := m.state.containers[rootID]
+        m.state.mtx.mu.Unlock()
+
+        if !exists {
+            lines = append(lines, fmt.Sprintf("[-] Error: Pod %s doesn't exist", letter))
+        } else {
+            idx := m.state.GetNextContainerIndex(letter)
+						name := fmt.Sprintf("bctor-%s%d", letter, idx)
+            // StartJoiner needs a 'command' override parameter
+            go StartJoinerBatch(root, name, fullCmd, m.state, ipc)
+            lines = append(lines, fmt.Sprintf("[+] Running batch in %s: %s", letter, fullCmd))
+        }
+    } else {
+        // CREATOR BATCH
+        // StartCreator needs a 'command' override parameter
+        c, err := StartCreatorBatch(letter, fullCmd, m.state, ipc)
+        if err != nil {
+            lines = append(lines, "[-] Failed to start batch creator")
+        } else {
+            m.state.mtx.mu.Lock()
+            m.state.containers[c.Spec.ID] = c
+            m.state.mtx.mu.Unlock()
+            lines = append(lines, fmt.Sprintf("[+] New Pod [%s] running: %s", letter, fullCmd))
+        }
+    }
+
+    lib.DrawBox("BATCH RUN", lines)
+}
+
 func (m *Multiplexer) d_clear() {
 	// Standard ANSI escape sequence to clear screen and home cursor
 	fmt.Print("\033[H\033[2J")	
@@ -62,12 +135,12 @@ func (m *Multiplexer) d_exit() {
     lib.LogInfo("Supervisor shutting down. Cleaning up global network...")
     
     // 1. Kill any remaining containers
-    m.mu.Lock()
+    m.state.mtx.mu.Lock()
     for id, c := range m.state.containers {
          unix.Kill(c.WorkloadPID, unix.SIGKILL)
          delete(m.state.containers, id)
     }
-    m.mu.Unlock()
+    m.state.mtx.mu.Unlock()
 
     // 2. Now delete the global infrastructure
     ntw.RemoveNATRule("10.0.0.0/24", m.state.iface)
@@ -88,8 +161,8 @@ func (m *Multiplexer) d_kill(input string) {
 	}
 
 	podLetter := parts[1]
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.state.mtx.mu.Lock()
+	defer m.state.mtx.mu.Unlock()
 
 	foundAny := false
 
@@ -138,9 +211,9 @@ func (m *Multiplexer) d_new(input string) {
 						lines = append(lines, "[-] Start Creator failed")
 				} else {
 						// Update state map
-						m.mu.Lock()
+						m.state.mtx.mu.Lock()
 						m.state.containers[c.Spec.ID] = c
-						m.mu.Unlock()		
+						m.state.mtx.mu.Unlock()		
 									
 						lines = append(lines, fmt.Sprintf("[+] Created Pod [%s]", letter))
 				}
@@ -161,10 +234,10 @@ func (m *Multiplexer) d_new(input string) {
         }
 
         // Verify Root exists
-        m.mu.Lock()
+        m.state.mtx.mu.Lock()
         rootID := fmt.Sprintf("bctor-%s1", letter)
         root, exists := m.state.containers[rootID]
-        m.mu.Unlock()
+        m.state.mtx.mu.Unlock()
 
         if !exists {
             lines = append(lines, fmt.Sprintf("[-] Error: Pod %s does not exist", letter))
@@ -178,9 +251,9 @@ func (m *Multiplexer) d_new(input string) {
 
                 // IMPORTANT: We need a placeholder in the map immediately 
                 // so the NEXT iteration of the loop sees this index as 'taken'
-                m.mu.Lock()
+                m.state.mtx.mu.Lock()
                 m.state.containers[name] = &Container{State: ContainerInitializing} 
-                m.mu.Unlock()
+                m.state.mtx.mu.Unlock()
 
                 go StartJoiner(root, name, lib.ModeInteractive, lib.ProfileDebugShell, m.state, ipc)
                 lines = append(lines, fmt.Sprintf("[+] Container [%s] joining Pod [%s]", name, letter))
@@ -305,115 +378,115 @@ func (m *Multiplexer) d_help() {
 	lib.DrawBox("BCTOR COMMAND REFERENCE", lines)
 }
 
-
-
 func (m *Multiplexer) d_attach(input string) {
-	targetID := strings.TrimSpace(input[7:])
-	if !strings.HasPrefix(targetID, "bctor-") {
-		targetID = "bctor-" + targetID
+	parts := strings.Fields(input)
+	
+	// check input
+	if len(parts) < 2 {
+			fmt.Println("\r\n[-] Usage: attach <id> (e.g., attach a1)")
+			m.RefreshPrompt()
+			return
 	}
 
+	targetID := parts[1] // b3 or bctor-b3
+	if !strings.HasPrefix(targetID, "bctor-") {
+			targetID = "bctor-" + targetID
+	}
+
+    // check if alive
+	m.state.mtx.mu.Lock()
+	container, exists := m.state.containers[targetID]
+	m.state.mtx.mu.Unlock()	
+	
+
+	if !exists || container == nil {
+		fmt.Printf("\r\n[-] Error: Container %s does not exist.\r\n", targetID)
+		m.RefreshPrompt()
+		return
+	}	
+
+	// check lifecycle
+	if container.State == ContainerExited || container.State == ContainerStopped {
+		fmt.Printf("\r\n[-] Error: Cannot attach to %s (Status: %v).\r\n", targetID, container.State)
+		m.RefreshPrompt()
+		return
+	}
+
+	// check pty
 	m.mu.Lock()
-	_, ok := m.targets[targetID]
-	if ok {
+	_, hasTarget := m.targets[targetID]
+	if hasTarget {
 		m.activeID = targetID
-		m.lineBuf = nil
+		m.lineBuf = nil 
 	}
 	m.mu.Unlock()
 
-	if ok {
+	if hasTarget {
 		fmt.Print("\r\x1b[K")
 		fmt.Printf("[!] Attached to %s. (Ctrl+X to detach)\r\n", targetID)
 	} else {
-		fmt.Printf("\r\n[-] Unknown container: %s\r\n", targetID)
+		fmt.Printf("\r\n[-] Error: Container %s is alive but PTY is missing.\r\n", targetID)
 		m.RefreshPrompt()
 	}
 }
 
 func (m *Multiplexer) d_exec(input string) {
-	parts := strings.SplitN(input[1:], " ", 2)
-	if len(parts) != 2 {
-		fmt.Printf("\r\n[-] Usage: :<id> <command>\r\n")
-		return
-	}
+    
+    parts := strings.SplitN(input[1:], " ", 2)
+    if len(parts) != 2 {
+        fmt.Printf("\r\n[-] Usage: :<id> <command>\r\n")
+        return
+    }
+    targetID, cmd := parts[0], strings.TrimSpace(parts[1])
+    
+    m.mu.Lock()
+    pendingExecs := make(map[string]*Target)
+    
+    if targetID == "*" {
+        for id, t := range m.targets { pendingExecs[id] = t }
+    } else if strings.HasPrefix(targetID, "!") {
+        exclude := "bctor-" + strings.TrimPrefix(targetID, "!")
+        for id, t := range m.targets {
+            if id != exclude { pendingExecs[id] = t }
+        }
+    } else {
+        fullID := targetID
+        if !strings.HasPrefix(fullID, "bctor-") { fullID = "bctor-" + targetID }
+        if t, ok := m.targets[fullID]; ok {
+            pendingExecs[fullID] = t
+        } else {
+            fmt.Printf("\r\n[-] Unknown container: %s\r\n", fullID)
+            m.mu.Unlock()
+            return
+        }
+    }
+    m.mu.Unlock()
+    
+    for id, target := range pendingExecs {
+        m.state.mtx.mu.Lock()
+        container, exists := m.state.containers[id]
+        
+        // check if alive
+        if !exists || container == nil || container.State == ContainerExited {
+            m.state.mtx.mu.Unlock()            
+            if len(pendingExecs) == 1 {
+                fmt.Printf("\r\n[-] Cannot exec: %s is not running.\r\n", id)
+            }
+            continue
+        }
+        
+        // final check
+        if err := syscall.Kill(container.WorkloadPID, 0); err != nil {
+            container.State = ContainerExited // sync
+            m.state.mtx.mu.Unlock()
+            continue
+        }
+        m.state.mtx.mu.Unlock()
+        
+        m.execOne(id, target, cmd)
+    }
 
-	targetID, cmd := parts[0], strings.TrimSpace(parts[1])
-	//fmt.Printf("parts: %v\n", parts)
-
-	// BROADCAST COMMAND
-	if targetID == "*" {
-		m.mu.Lock()
-		targetsCopy := make(map[string]*Target, len(m.targets))
-		for id, t := range m.targets {
-			targetsCopy[id] = t
-		}
-		m.mu.Unlock()
-
-		for id, target := range targetsCopy {
-			m.execOne(id, target, cmd)
-		}
-
-		// restore prompt
-		m.mu.Lock()
-		if m.activeID == "" {
-			fmt.Print("\rbctor ❯ ")
-		}
-		m.mu.Unlock()
-
-		return
-
-	}
-
-	// ALL EXCEPT
-	if strings.HasPrefix(targetID, "!") {
-		allExcept := strings.TrimPrefix(targetID, "!")
-
-		m.mu.Lock()
-		targetsCopy := make(map[string]*Target, len(m.targets)-1)
-		for id, t := range m.targets {
-			if id == "bctor-"+allExcept {
-				continue
-			}
-			targetsCopy[id] = t
-		}
-		m.mu.Unlock()
-
-		for id, target := range targetsCopy {
-			m.execOne(id, target, cmd)
-		}
-
-		// restore prompt
-		m.mu.Lock()
-		if m.activeID == "" {
-			fmt.Print("\rbctor ❯ ")
-		}
-		m.mu.Unlock()
-
-		return
-	}
-
-	// ONE TARGET COMMAND
-	if !strings.HasPrefix(targetID, "bctor-") {
-		targetID = "bctor-" + targetID
-	}
-
-	m.mu.Lock()
-	target, ok := m.targets[targetID]
-	m.mu.Unlock()
-
-	if !ok {
-		fmt.Printf("\r\n[-] Unknown container: %s\r\n", targetID)
-		return
-	}
-
-	m.execOne(targetID, target, cmd)
-
-	// restore prompt
-	m.mu.Lock()
-	if m.activeID == "" {
-		fmt.Print("\rbctor ❯ ")
-	}
-	m.mu.Unlock()
+    m.RefreshPrompt()
 }
 
 func (m *Multiplexer) execOne(targetID string, target *Target, cmd string) {

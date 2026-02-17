@@ -117,7 +117,7 @@ func runWorkload(spec *ContainerSpec) {
 	profile := spec.Seccomp
 	if _, ok := WorkloadRegistry[profile]; !ok {
 		if spec.Workload.Mode == ModeBatch {
-			profile = ProfileIpLink
+			profile = ProfileBatch
 		} else {
 			profile = ProfileDebugShell
 		}

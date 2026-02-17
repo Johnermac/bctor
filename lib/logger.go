@@ -106,24 +106,21 @@ func StartGlobalLogger(
 			isAttached := mtx.GetActiveID() == msg.ContainerID
 			switch msg.Type {
 			case TypeContainer:
-				// ----- BATCH HEADER -----
-				if msg.IsHeader {
-					buffers[msg.ContainerID] = []string{}
-					continue
+				// We don't need IsHeader/IsFooter if we want live streaming
+				if msg.IsHeader || msg.IsFooter {
+						continue 
 				}
 
-				// ----- BATCH FOOTER -----
-				if msg.IsFooter {
-					lines := buffers[msg.ContainerID]
-					delete(buffers, msg.ContainerID)
-
-					title := fmt.Sprintf("EXEC: %s", msg.ContainerID)
-					DrawBox(title, lines)
-
-					if mtx.GetActiveID() == "" {
-						mtx.RefreshPrompt()
-					}
-					continue
+				if isAttached {
+						os.Stdout.Write([]byte(msg.Data))
+				} else {
+						// This gives you live, prefixed output for batch commands
+						fmt.Printf("\r\x1b[K%s[%s]%s %s\r\n", 
+								Cyan, msg.ContainerID, Reset, msg.Data)
+						
+						if mtx.GetActiveID() == "" {
+								mtx.RefreshPrompt()
+						}
 				}
 
 				// ----- BATCH BUFFERING -----
