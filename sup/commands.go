@@ -2,6 +2,7 @@ package sup
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 	"syscall"
 
 	"github.com/Johnermac/bctor/lib"
+	"github.com/Johnermac/bctor/lib/ntw"
+	"golang.org/x/sys/unix"
 )
 
 // menu of commands
@@ -19,15 +22,29 @@ func (m *Multiplexer) Dispatch(input string) {
 	}
 
 	switch {
-	case input == "list" || strings.HasPrefix(input, "list "):
+	case input == "list" || 
+	input == "ls" || 
+	input == "l" || 
+	strings.HasPrefix(input, "list ") || 
+	strings.HasPrefix(input, "ls ") ||
+	strings.HasPrefix(input, "l "):
 		m.d_list(input)
 	case strings.HasPrefix(input, ":"):
 		m.d_exec(input)
-	case strings.HasPrefix(input, "attach "):
+	case strings.HasPrefix(input, "attach ") || strings.HasPrefix(input, "a ") :
 		m.d_attach(input)
-	case input == "new" || strings.HasPrefix(input, "new "):
+	case input == "new" || 
+	input == "n" || 
+	strings.HasPrefix(input, "new ") || 
+	strings.HasPrefix(input, "n ") :
 		m.d_new(input)
-	case input == "help":
+	case strings.HasPrefix(input, "kill ") || strings.HasPrefix(input, "k "):	
+		m.d_kill(input)
+	case input == "clear" || input ==  "cls" || input == "c":
+    m.d_clear()
+	case input == "exit" || input == "bye":	
+		m.d_exit()
+	case input == "help" || input == "h":
 		m.d_help()
 	default:
 		fmt.Printf("\r\n[-] Unknown command: %s\r\n", input)
@@ -35,6 +52,78 @@ func (m *Multiplexer) Dispatch(input string) {
 	}
 }
 
+func (m *Multiplexer) d_clear() {
+	// Standard ANSI escape sequence to clear screen and home cursor
+	fmt.Print("\033[H\033[2J")	
+	fmt.Printf("%sBctor Supervisor Ready%s\r\n", lib.Cyan, lib.Reset)
+}
+
+func (m *Multiplexer) d_exit() {
+    lib.LogInfo("Supervisor shutting down. Cleaning up global network...")
+    
+    // 1. Kill any remaining containers
+    m.mu.Lock()
+    for id, c := range m.state.containers {
+         unix.Kill(c.WorkloadPID, unix.SIGKILL)
+         delete(m.state.containers, id)
+    }
+    m.mu.Unlock()
+
+    // 2. Now delete the global infrastructure
+    ntw.RemoveNATRule("10.0.0.0/24", m.state.iface)
+    ntw.DeleteBridge("bctor0")
+    
+    lib.LogSuccess("Global cleanup complete. Goodbye!")	
+		os.Exit(0)	
+}
+
+func (m *Multiplexer) d_kill(input string) {
+	lines := []string{}
+	parts := strings.Fields(input)
+
+	if len(parts) < 2 || len(parts) > 3 {
+		lines = append(lines, "Usage: kill <pod_letter> | kill <pod_letter> <index>")
+		lib.DrawBox("KILL STATUS", lines)
+		return
+	}
+
+	podLetter := parts[1]
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	foundAny := false
+
+	// CASE: kill a 2 (Specific container)
+	if len(parts) == 3 {
+		index := parts[2]
+		targetID := fmt.Sprintf("bctor-%s%s", podLetter, index)
+
+		if c, exists := m.state.containers[targetID]; exists {
+			syscall.Kill(c.WorkloadPID, syscall.SIGKILL)
+			lines = append(lines, fmt.Sprintf("[+] Killed container %s (PID %d)", targetID, c.WorkloadPID))
+			foundAny = true
+		}
+
+	// CASE: kill a (Entire Pod)
+	} else {
+		// We search for all containers starting with bctor-a
+		prefix := fmt.Sprintf("bctor-%s", podLetter)
+		for id, c := range m.state.containers {
+			if strings.HasPrefix(id, prefix) {
+				syscall.Kill(c.WorkloadPID, syscall.SIGKILL)
+				lines = append(lines, fmt.Sprintf("[+] Killed %s (PID %d)", id, c.WorkloadPID))
+				foundAny = true
+			}
+		}
+	}
+
+	if !foundAny {
+		lines = append(lines, fmt.Sprintf("[-] No active containers found for Pod [%s]", podLetter))
+	}
+
+	title := fmt.Sprintf("KILL POD [%s]", strings.ToUpper(podLetter))
+	lib.DrawBox(title, lines)
+}
 
 func (m *Multiplexer) d_new(input string) {
     lines := []string{}
@@ -114,6 +203,7 @@ func (m *Multiplexer) d_list(input string) {
 	}
 	m.mu.Unlock()
 
+	// list
 	if len(parts) == 1 {
 		podCounts := map[string]int{}
 		podAlive := map[string]int{}
@@ -142,7 +232,9 @@ func (m *Multiplexer) d_list(input string) {
 				total := podCounts[pod]
 				alive := podAlive[pod]
 				dead := total - alive
-				lines = append(lines, fmt.Sprintf("Pod [%s] Containers:%d Alive:%d Dead:%d", pod, total, alive, dead))
+				lines = append(
+					lines, fmt.Sprintf("Pod [%s] Containers:%d Alive:%s%d%s Dead:%s%d%s", 
+					pod, total, lib.Cyan, alive, lib.Reset, lib.Red, dead, lib.Reset))
 			}
 		}		
 		lib.DrawBox("POD STATUS", lines)
@@ -213,31 +305,7 @@ func (m *Multiplexer) d_help() {
 	lib.DrawBox("BCTOR COMMAND REFERENCE", lines)
 }
 
-func splitContainerID(id string) (pod string, index string, ok bool) {
-	if !strings.HasPrefix(id, "bctor-") {
-		return "", "", false
-	}
 
-	rest := strings.TrimPrefix(id, "bctor-")
-	if len(rest) < 2 {
-		return "", "", false
-	}
-
-	i := 0
-	for i < len(rest) && rest[i] >= 'a' && rest[i] <= 'z' {
-		i++
-	}
-	if i == 0 || i == len(rest) {
-		return "", "", false
-	}
-	for j := i; j < len(rest); j++ {
-		if rest[j] < '0' || rest[j] > '9' {
-			return "", "", false
-		}
-	}
-
-	return rest[:i], rest[i:], true
-}
 
 func (m *Multiplexer) d_attach(input string) {
 	targetID := strings.TrimSpace(input[7:])
@@ -371,4 +439,30 @@ func (m *Multiplexer) execOne(targetID string, target *Target, cmd string) {
 		fmt.Sprintf("EXEC: %s (PID: %d)", targetID, target.PID),
 		lines,
 	)
+}
+
+func splitContainerID(id string) (pod string, index string, ok bool) {
+	if !strings.HasPrefix(id, "bctor-") {
+		return "", "", false
+	}
+
+	rest := strings.TrimPrefix(id, "bctor-")
+	if len(rest) < 2 {
+		return "", "", false
+	}
+
+	i := 0
+	for i < len(rest) && rest[i] >= 'a' && rest[i] <= 'z' {
+		i++
+	}
+	if i == 0 || i == len(rest) {
+		return "", "", false
+	}
+	for j := i; j < len(rest); j++ {
+		if rest[j] < '0' || rest[j] > '9' {
+			return "", "", false
+		}
+	}
+
+	return rest[:i], rest[i:], true
 }
