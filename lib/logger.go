@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 )
@@ -208,50 +209,67 @@ func CaptureLogs(
 }
 
 func DrawBox(title string, lines []string) {
-	const innerWidth = 70
+	minWidth := 50
+	maxWidth := 100
+
+	// 1. Calculate innerWidth using Runes, not Bytes
+	innerWidth := utf8.RuneCountInString(StripANSI(title))
+
+	for _, l := range lines {
+		visLen := utf8.RuneCountInString(StripANSI(l)) // FIX: Use Runes here
+		if visLen > innerWidth {
+			innerWidth = visLen
+		}
+	}
+
+	if innerWidth < minWidth {
+		innerWidth = minWidth
+	}
+	if innerWidth > maxWidth {
+		innerWidth = maxWidth
+	}
 
 	fmt.Print("\r\x1b[K")
-
 	hline := strings.Repeat("─", innerWidth+2)
 
-	fmt.Printf("\r%s┌%s┐%s\r\n", Cyan, hline, Reset)
-	fmt.Printf("\r%s│ %-*s │%s\r\n", Cyan, innerWidth, stripANSI(title), Reset)
-	fmt.Printf("\r%s├%s┤%s\r\n", Cyan, hline, Reset)
+	// Header
+	fmt.Printf("\r%s┌%s┐%s\n", Cyan, hline, Reset)
+	// Use the %-*s with stripANSI(title) is okay because title usually has no dots/emojis
+	fmt.Printf("\r%s│ %-*s │%s\n", Cyan, innerWidth, StripANSI(title), Reset)
+	fmt.Printf("\r%s├%s┤%s\n", Cyan, hline, Reset)
 
 	if len(lines) == 0 {
-		fmt.Printf("\r%s│ %-*s │%s\r\n", Cyan, innerWidth, "(no data)", Reset)
+		fmt.Printf("\r%s│ %-*s │%s\n", Cyan, innerWidth, "(no data)", Reset)
 	} else {
 		for _, line := range lines {
-
 			clean := strings.ReplaceAll(line, "\r", "")
-			visible := stripANSI(clean)
+			visible := StripANSI(clean)
+			visLen := utf8.RuneCountInString(visible)
 
-			// truncate using visible length but preserve ANSI in output
-			if len(visible) > innerWidth {
-				visible = visible[:innerWidth-3] + "..."
-				clean = visible // fallback: drop colors on truncated lines (safe + simple)
+			displayLine := clean
+			// FIX: Comparison should also be Rune-based
+			if visLen > innerWidth {
+				// Truncating Unicode is tricky; this is a safe way to do it
+				runes := []rune(visible)
+				displayLine = string(runes[:innerWidth-3]) + "..."
+				visLen = innerWidth // Reset visLen for padding math
 			}
 
-			padding := innerWidth - len(visible)
+			padding := innerWidth - visLen
 			if padding < 0 {
 				padding = 0
 			}
 
-			fmt.Printf("\r%s│%s %s%s %s│%s\r\n",
-				Cyan,
-				Reset,
-				clean,
-				strings.Repeat(" ", padding),
-				Cyan,
-				Reset,
-			)
+			// Print: notice the extra space after displayLine for consistent "gutter"
+			fmt.Printf("\r%s│ %s%s %s│%s\n",
+				Cyan, displayLine, strings.Repeat(" ", padding), Cyan, Reset)
 		}
 	}
 
-	fmt.Printf("\r%s└%s┘%s\r\n", Cyan, hline, Reset)
+	fmt.Printf("\r%s└%s┘%s\n", Cyan, hline, Reset)
 }
 
-func stripANSI(s string) string {
+func StripANSI(s string) string {
 	ansi := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	return ansi.ReplaceAllString(s, "")
 }

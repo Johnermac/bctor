@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode/utf8"
 
 	"github.com/Johnermac/bctor/lib"
 	"github.com/Johnermac/bctor/lib/ntw"
@@ -55,7 +56,6 @@ func (m *Multiplexer) Dispatch(input string) {
 	}
 }
 
-// "run a ping 8.8.8.8" -> ["run", "a", "ping", "8.8.8.8"]
 func (m *Multiplexer) d_run(input string) {
 	lines := []string{}
 	parts := strings.Fields(input)
@@ -104,13 +104,12 @@ func (m *Multiplexer) d_run(input string) {
 		} else {
 			idx := m.state.GetNextContainerIndex(letter)
 			name := fmt.Sprintf("bctor-%s%d", letter, idx)
-			// StartJoiner needs a 'command' override parameter
+			
 			go StartJoinerBatch(root, name, fullCmd, m.state, ipc)
 			lines = append(lines, fmt.Sprintf("[+] Running batch in %s: %s", letter, fullCmd))
 		}
 	} else {
-		// CREATOR BATCH
-		// StartCreator needs a 'command' override parameter
+		// CREATOR BATCH		
 		c, err := StartCreatorBatch(letter, fullCmd, m.state, ipc)
 		if err != nil {
 			lines = append(lines, "[-] Failed to start batch creator")
@@ -126,15 +125,14 @@ func (m *Multiplexer) d_run(input string) {
 }
 
 func (m *Multiplexer) d_clear() {
-	// Standard ANSI escape sequence to clear screen and home cursor
+	// ansi scape
 	fmt.Print("\033[H\033[2J")
 	fmt.Printf("%sBctor Supervisor Ready%s\r\n", lib.Cyan, lib.Reset)
 }
 
 func (m *Multiplexer) d_exit() {
 	lib.LogInfo("Supervisor shutting down. Cleaning up global network...")
-
-	// 1. Kill any remaining containers
+	
 	m.state.mtx.mu.Lock()
 	for id, c := range m.state.containers {
 		unix.Kill(c.WorkloadPID, unix.SIGKILL)
@@ -142,7 +140,7 @@ func (m *Multiplexer) d_exit() {
 	}
 	m.state.mtx.mu.Unlock()
 
-	// 2. Now delete the global infrastructure
+	// delete global
 	ntw.RemoveNATRule("10.0.0.0/24", m.state.iface)
 	ntw.DeleteBridge("bctor0")
 
@@ -166,7 +164,7 @@ func (m *Multiplexer) d_kill(input string) {
 
 	foundAny := false
 
-	// CASE: kill a 2 (Specific container)
+	// kill specific container
 	if len(parts) == 3 {
 		index := parts[2]
 		targetID := fmt.Sprintf("bctor-%s%s", podLetter, index)
@@ -177,9 +175,8 @@ func (m *Multiplexer) d_kill(input string) {
 			foundAny = true
 		}
 
-		// CASE: kill a (Entire Pod)
-	} else {
-		// We search for all containers starting with bctor-a
+		// kill pod
+	} else {		
 		prefix := fmt.Sprintf("bctor-%s", podLetter)
 		for id, c := range m.state.containers {
 			if strings.HasPrefix(id, prefix) {
@@ -202,15 +199,14 @@ func (m *Multiplexer) d_new(input string) {
 	lines := []string{}
 	parts := strings.Fields(input)
 
-	// CASE 1: "new" (Creator)
+	// creator
 	if len(parts) == 1 {
 		ipc, _ := lib.NewIPC()
 		letter, _ := m.state.GetNextPodLetter()
 		c, err := StartCreator(letter, lib.ModeInteractive, lib.ProfileDebugShell, m.state, ipc)
 		if err != nil {
 			lines = append(lines, "[-] Start Creator failed")
-		} else {
-			// Update state map
+		} else {			
 			m.state.mtx.mu.Lock()
 			m.state.containers[c.Spec.ID] = c
 			m.state.mtx.mu.Unlock()
@@ -218,12 +214,12 @@ func (m *Multiplexer) d_new(input string) {
 			lines = append(lines, fmt.Sprintf("[+] Created Pod [%s]", letter))
 		}
 
-		// CASE 2: "new a" or "new a 2" (Joiner)
+		// joiner
 	} else if len(parts) >= 2 {
 		letter := parts[1]
 		count := 1
 
-		// Argument parsing
+		// parsing
 		if len(parts) == 3 {
 			if val, err := strconv.Atoi(parts[2]); err == nil && val > 0 {
 				count = val
@@ -231,8 +227,7 @@ func (m *Multiplexer) d_new(input string) {
 				lines = append(lines, "[-] Invalid count, defaulting to 1")
 			}
 		}
-
-		// Verify Root exists
+		
 		m.state.mtx.mu.Lock()
 		rootID := fmt.Sprintf("bctor-%s1", letter)
 		root, exists := m.state.containers[rootID]
@@ -243,13 +238,10 @@ func (m *Multiplexer) d_new(input string) {
 		} else {
 			for i := 0; i < count; i++ {
 				ipc, _ := lib.NewIPC()
-
-				// Get next number (e.g., 2)
+				
 				num := m.state.GetNextContainerIndex(letter)
 				name := fmt.Sprintf("bctor-%s%d", letter, num)
-
-				// IMPORTANT: We need a placeholder in the map immediately
-				// so the NEXT iteration of the loop sees this index as 'taken'
+				
 				m.state.mtx.mu.Lock()
 				m.state.containers[name] = &Container{State: ContainerInitializing}
 				m.state.mtx.mu.Unlock()
@@ -259,8 +251,7 @@ func (m *Multiplexer) d_new(input string) {
 			}
 		}
 	}
-
-	// Final display
+	
 	lib.DrawBox("POD MANAGEMENT", lines)
 }
 
@@ -304,13 +295,45 @@ func (m *Multiplexer) d_list(input string) {
 				total := podCounts[pod]
 				alive := podAlive[pod]
 				dead := total - alive
-				lines = append(
-					lines, fmt.Sprintf("Pod [%s] Containers:%d Alive:%s%d%s Dead:%s%d%s",
-						pod, total, lib.Cyan, alive, lib.Reset, lib.Red, dead, lib.Reset))
-			}
-		}
-		lib.DrawBox("POD STATUS", lines)
 
+				podColor := lib.Green
+				if alive == 0 && total > 0 {
+					podColor = lib.Red
+				} else if dead > 0 {
+					podColor = lib.Yellow
+				}
+
+				// health bar
+				healthBar := ""
+				for i := 0; i < alive; i++ {
+					healthBar += lib.Green + "●"
+				}
+				for i := 0; i < dead; i++ {
+					healthBar += lib.Red + "○"
+				}
+				healthBar += lib.Reset
+				 
+				visualLen := utf8.RuneCountInString(lib.StripANSI(healthBar))
+
+				// spacing
+				barWidth := 10
+				padding := barWidth - visualLen
+				if padding < 0 {
+					padding = 0
+				}
+				spacer := strings.Repeat(" ", padding)
+				
+				line := fmt.Sprintf("%sPod [%s]%s  %s%s%s%s  Total:%2d  Alive:%s%2d%s  Dead:%s%2d%s",
+					podColor, pod, lib.Reset,
+					"\x1b[2m", healthBar, spacer, "\x1b[0m",
+					total,
+					lib.Cyan, alive, lib.Reset,
+					lib.Red, dead, lib.Reset,
+				)
+				lines = append(lines, line)
+			}
+			lib.DrawBox("POD STATUS", lines)
+		}
 	} else if len(parts) == 2 {
 		// list <pod>
 		pod := parts[1]
