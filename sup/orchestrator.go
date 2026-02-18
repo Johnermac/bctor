@@ -17,17 +17,18 @@ type appState struct {
 	scx        lib.SupervisorCtx
 	mtx        *Multiplexer
 	iface      string
-
+	Forwards   map[string][]ntw.ForwardingSession
 	LoggerDone chan bool
 	LogChan    chan lib.LogMsg
 	Wg         sync.WaitGroup
 }
 
-func Setup(containerCount int) (*appState, error) {
+func Setup() (*appState, error) {
 	state := &appState{
 		containers: make(map[string]*Container),
 		scx: lib.SupervisorCtx{
-			Handles: make(map[string]map[lib.NamespaceType]*lib.NamespaceHandle),
+			Handles:  make(map[string]map[lib.NamespaceType]*lib.NamespaceHandle),
+			Forwards: ntw.NewPortForwarder(),
 		},
 		LoggerDone: make(chan bool),
 		LogChan:    make(chan lib.LogMsg, 200),
@@ -61,7 +62,7 @@ func Setup(containerCount int) (*appState, error) {
 	state.scx.ParentNS, _ = lib.ReadNamespaces(os.Getpid())
 
 	state.Wg.Add(1) //onContainerExit
-	go OnContainerExit(state.containers, &state.scx, events, state.iface, &state.Wg, containerCount)
+	go OnContainerExit(state.containers, &state.scx, events, state.iface, &state.Wg)
 	//state.Wg.Add(1) // main loop
 
 	return state, nil
@@ -143,6 +144,7 @@ func StartJoiner(root *Container, name string, runMode lib.ExecutionMode, runPro
 
 	ipc.PtySlave.Close()
 	lib.FreeFd(cj.IPC.KeepAlive[1])
+	cj.IPC.KeepAlive[1] = -1
 }
 
 func (s *appState) GetNextPodLetter() (string, error) {
@@ -234,6 +236,7 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 		ipc.PtySlave.Close()
 	}
 	lib.FreeFd(cj.IPC.KeepAlive[1])
+	cj.IPC.KeepAlive[1] = -1
 }
 
 func StartCreatorBatch(letter string, cmd string, state *appState, ipc *lib.IPC) (*Container, error) {
@@ -265,8 +268,8 @@ func StartCreatorBatch(letter string, cmd string, state *appState, ipc *lib.IPC)
 	ipc.PtySlave.Close()
 	state.mtx.Register(spec.ID, ipc.PtyMaster, c.WorkloadPID)
 
-	// Ensure the KeepAlive for the root is handled so it doesn't collapse early
 	lib.FreeFd(c.IPC.KeepAlive[1])
+	c.IPC.KeepAlive[1] = -1
 
 	return c, nil
 }

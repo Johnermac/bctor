@@ -261,8 +261,8 @@ func DrawBox(title string, lines []string) {
 			}
 
 			// Print: notice the extra space after displayLine for consistent "gutter"
-			fmt.Printf("\r%s│ %s%s %s│%s\n",
-				Cyan, displayLine, strings.Repeat(" ", padding), Cyan, Reset)
+			fmt.Printf("\r%s│%s %s%s %s│%s\n",
+				Cyan, Reset, displayLine, strings.Repeat(" ", padding), Cyan, Reset)
 		}
 	}
 

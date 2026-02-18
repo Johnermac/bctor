@@ -12,9 +12,7 @@ func main() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	const N = 0 // number of containers to start
-
-	state, err := sup.Setup(N)
+	state, err := sup.Setup()
 	if err != nil {
 		lib.LogError("setup failed: %v", err)
 		return

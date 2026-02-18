@@ -27,13 +27,19 @@ type IPManager interface {
 	Release(net.IP)
 }
 
+type ForwardManager interface {
+	AddSession(containerID string, hostPort, containerPort int, pid int) error
+	CleanupForward(containerID string)
+	List(id string) []int
+}
+
 type SupervisorCtx struct {
 	ParentNS *NamespaceState
 	Handles  map[string]map[NamespaceType]*NamespaceHandle // containerID -> nsType -> handle
-
-	IPAlloc IPManager
-	Subnet  *net.IPNet
-	Mu      sync.Mutex
+	IPAlloc  IPManager
+	Subnet   *net.IPNet
+	Mu       sync.Mutex
+	Forwards ForwardManager
 }
 
 // namespaces
