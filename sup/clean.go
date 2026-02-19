@@ -48,7 +48,7 @@ func OnContainerExit(
 			// --- 1. WORKLOAD CLEANUP ---
 			if ev.PID == c.WorkloadPID {
 				lib.LogInfo("Reaper: Workload for %s exited. Killing Init...", c.Spec.ID)
-				
+
 				if c.Spec.IsNetRoot && c.IPC != nil && c.IPC.KeepAlive[1] >= 0 {
 					lib.FreeFd(c.IPC.KeepAlive[1])
 					c.IPC.KeepAlive[1] = -1
@@ -61,7 +61,7 @@ func OnContainerExit(
 				lib.LogWarn("Reaper: Container %s (PID %d) exited", c.Spec.ID, ev.PID)
 
 				podName, _, isPodContainer := splitContainerID(c.Spec.ID)
-				if c.Net != nil && isPodContainer {					
+				if c.Net != nil && isPodContainer {
 					podNetResources[podName] = c.Net
 				}
 

@@ -65,7 +65,7 @@ func PortForward(targetPID int, hostPort, containerPort int, stop chan bool) err
 func handleForwardConn(pid int, hostConn net.Conn, containerPort int) {
 	defer hostConn.Close()
 
-	// itwll enter network namespace to dial	
+	// itwll enter network namespace to dial
 	var containerConn net.Conn
 	err := ExecuteInNamespace(pid, lib.NSNet, func() error {
 		var dialErr error
@@ -87,28 +87,28 @@ func handleForwardConn(pid int, hostConn net.Conn, containerPort int) {
 }
 
 func ExecuteInNamespace(pid int, nsType lib.NamespaceType, fn func() error) error {
-	
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	// save host namespace
 	hostNS, _ := netns.Get()
 	defer hostNS.Close()
-	 
+
 	// usually /proc/<pid>/ns/net
 	containerNS, err := netns.GetFromPid(pid)
 	if err != nil {
 		return err
 	}
 	defer containerNS.Close()
-	
+
 	if err := netns.Set(containerNS); err != nil {
 		return err
 	}
 
 	// go back
 	defer netns.Set(hostNS)
-	
+
 	return fn()
 }
 
@@ -120,7 +120,7 @@ func (pf *PortForwarder) AddSession(id string, hostPort, containerPort int, pid 
 	if err != nil {
 		return err
 	}
-	
+
 	pf.mu.Lock()
 	pf.sessions[id] = append(pf.sessions[id], ForwardingSession{
 		HostPort: hostPort,
@@ -137,7 +137,7 @@ func (pf *PortForwarder) CleanupForward(id string) {
 	defer pf.mu.Unlock()
 
 	if sessions, ok := pf.sessions[id]; ok {
-		for _, s := range sessions {			
+		for _, s := range sessions {
 			select {
 			case s.Stop <- true:
 			default:

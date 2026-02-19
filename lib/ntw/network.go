@@ -145,7 +145,7 @@ func SetupContainerVeth(
 	netnsFD int, // Use o INT do FD que veio do mapa 'created'
 	ip net.IP,
 ) (*NetResources, error) {
-	 
+
 	suffix := randomSuffix(4) // 4 bytes = 8 chars hex. Ex: ve-abcdef
 	hostVeth := fmt.Sprintf("ve-%s", suffix)
 	tempPeer := fmt.Sprintf("vp-%s", suffix)
@@ -159,7 +159,7 @@ func SetupContainerVeth(
 	if err := netlink.LinkAdd(veth); err != nil {
 		return nil, fmt.Errorf("LinkAdd failed: %w", err)
 	}
-	
+
 	cleanup := func() { _ = netlink.LinkDel(veth) }
 
 	// Setup da Bridge no Host
@@ -186,7 +186,7 @@ func SetupContainerVeth(
 		return nil, fmt.Errorf("LinkSetUp host failed: %w", err)
 	}
 
-	// Mover Peer para o Namespace do Container	
+	// Mover Peer para o Namespace do Container
 	peerLink, err := netlink.LinkByName(tempPeer)
 	if err != nil {
 		cleanup()
@@ -226,7 +226,7 @@ func ConfigureContainerInterface(
 	}
 	defer origNS.Close()
 
-	// go inside container	
+	// go inside container
 	if err := unix.Setns(netnsFD, unix.CLONE_NEWNET); err != nil {
 		return fmt.Errorf("setns to container failed: %w", err)
 	}

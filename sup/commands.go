@@ -456,37 +456,37 @@ func (m *Multiplexer) d_list(input string) {
 }
 
 func (m *Multiplexer) d_help() {
-    lines := []string{
-        "POD MANAGEMENT",
-        "  new | n           Create a new Pod (interactive)",
-        "  new <pod> <n>     Create/Join <n> containers to Pod.",
-        "  list | l          List all Pods, health, and forwards",
-        "  list <pod>        List details for a specific Pod",
-        "  kill | k <id>     Kill a specific container",
-				"  kill | k <pod>    Kill a Pod and all containers inside of it",
-        "",
-        "INTERACTION",
-        "  attach | a <id>   Connect TTY to container (e.g., a a1)",
-        "  Ctrl+X            Detach from current container",
-				"  run | r           Run batch commands from HOST to container",
-				"  <id> <command>    - Id is optional: (r a1 ls | r ls)",
-        "  clear | c         Clear the terminal screen",
-        "",
-        "NETWORKING",
-        "  forward | f <id> <port>  Map host port to Pod port",
-        "  (e.g., f a1 3000)        ➜ localhost:3000 -> Pod A:3000",
-        "",
-        "EXECUTION",
-        "  :<id> <cmd>       Run command in container (e.g., :a1 id)",
-        "  :* <cmd>          Broadcast command to ALL containers",
-        "  :!<id> <cmd>      Broadcast to all EXCEPT <id>",        
-        "",
-        "SYSTEM",
-        "  help | h          Show this menu",
-        "  exit | bye        Shutdown all pods and exit supervisor",
-    }
+	lines := []string{
+		"POD MANAGEMENT",
+		"  new | n           Create a new Pod (interactive)",
+		"  new <pod> <n>     Create/Join <n> containers to Pod.",
+		"  list | l          List all Pods, health, and forwards",
+		"  list <pod>        List details for a specific Pod",
+		"  kill | k <id>     Kill a specific container",
+		"  kill | k <pod>    Kill a Pod and all containers inside of it",
+		"",
+		"INTERACTION",
+		"  attach | a <id>   Connect TTY to container (e.g., a a1)",
+		"  Ctrl+X            Detach from current container",
+		"  run | r           Run batch commands from HOST to container",
+		"  <id> <command>    - Id is optional: (r a1 ls | r ls)",
+		"  clear | c         Clear the terminal screen",
+		"",
+		"NETWORKING",
+		"  forward | f <id> <port>  Map host port to Pod port",
+		"  (e.g., f a1 3000)        ➜ localhost:3000 -> Pod A:3000",
+		"",
+		"EXECUTION",
+		"  :<id> <cmd>       Run command in container (e.g., :a1 id)",
+		"  :* <cmd>          Broadcast command to ALL containers",
+		"  :!<id> <cmd>      Broadcast to all EXCEPT <id>",
+		"",
+		"SYSTEM",
+		"  help | h          Show this menu",
+		"  exit | bye        Shutdown all pods and exit supervisor",
+	}
 
-    lib.DrawBox("BCTOR COMMAND REFERENCE", lines)
+	lib.DrawBox("BCTOR COMMAND REFERENCE", lines)
 }
 
 func (m *Multiplexer) d_attach(input string) {

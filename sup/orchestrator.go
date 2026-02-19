@@ -150,13 +150,13 @@ func StartJoiner(root *Container, name string, runMode lib.ExecutionMode, runPro
 func (s *appState) GetNextPodLetter() (string, error) {
 	s.scx.Mu.Lock()
 	defer s.scx.Mu.Unlock()
-	
+
 	usedLetters := make(map[string]bool)
 	for _, c := range s.containers {
-		// If ID is "bctor-a1", podID is "a"		
+		// If ID is "bctor-a1", podID is "a"
 		parts := strings.Split(c.Spec.ID, "-")
 		if len(parts) > 1 {
-			podID := parts[1]			
+			podID := parts[1]
 			letter := regexp.MustCompile(`[0-9]`).ReplaceAllString(podID, "")
 			usedLetters[letter] = true
 		}
@@ -189,11 +189,11 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 	spec := lib.DefaultSpec()
 	spec.ID = name
 
-	// set to Batch Mode 
+	// set to Batch Mode
 	spec.Workload.Mode = lib.ModeBatch
 	spec.Seccomp = lib.ProfileBatch
 	spec.Workload.Args = []string{"sh", "-c", cmd}
-	
+
 	spec.Namespaces.USER = false
 	spec.Namespaces.MOUNT = true
 	spec.Namespaces.NET = true
@@ -222,7 +222,7 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 		state.Wg.Add(1)
 		go lib.CaptureLogs(spec.ID, readFd, ipc.Log2Sup[1], spec.Workload.Mode, state.LogChan, &state.Wg)
 	}
-	
+
 	state.mtx.Register(spec.ID, ipc.PtyMaster, cj.WorkloadPID)
 
 	// Cleanup FDs
@@ -250,12 +250,12 @@ func StartCreatorBatch(letter string, cmd string, state *appState, ipc *lib.IPC)
 		return nil, err
 	}
 	c.IPC = ipc
-	
+
 	readFd := ipc.Log2Sup[0]
 	state.Wg.Add(1)
 	go lib.CaptureLogs(spec.ID, readFd, ipc.Log2Sup[1], spec.Workload.Mode, state.LogChan, &state.Wg)
 
-	// Cleanup and Register	
+	// Cleanup and Register
 	ipc.PtySlave.Close()
 	state.mtx.Register(spec.ID, ipc.PtyMaster, c.WorkloadPID)
 

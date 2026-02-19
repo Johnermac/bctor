@@ -24,7 +24,7 @@ const (
 type LogMsg struct {
 	ContainerID string
 	Data        string
-	Type        LogType 
+	Type        LogType
 	IsHeader    bool
 	IsFooter    bool
 }
@@ -215,7 +215,7 @@ func DrawBox(title string, lines []string) {
 	innerWidth := utf8.RuneCountInString(StripANSI(title))
 
 	for _, l := range lines {
-		visLen := utf8.RuneCountInString(StripANSI(l)) 
+		visLen := utf8.RuneCountInString(StripANSI(l))
 		if visLen > innerWidth {
 			innerWidth = visLen
 		}
@@ -245,19 +245,19 @@ func DrawBox(title string, lines []string) {
 			visible := StripANSI(clean)
 			visLen := utf8.RuneCountInString(visible)
 
-			displayLine := clean			
+			displayLine := clean
 			if visLen > innerWidth {
-				// Truncating Unicode 
+				// Truncating Unicode
 				runes := []rune(visible)
 				displayLine = string(runes[:innerWidth-3]) + "..."
-				visLen = innerWidth 
+				visLen = innerWidth
 			}
 
 			padding := innerWidth - visLen
 			if padding < 0 {
 				padding = 0
 			}
-			
+
 			fmt.Printf("\r%s│%s %s%s %s│%s\n",
 				Cyan, Reset, displayLine, strings.Repeat(" ", padding), Cyan, Reset)
 		}
