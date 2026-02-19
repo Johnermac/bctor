@@ -1,4 +1,60 @@
-visual map
+Setup: [Linux only]
+
+```bash
+# Clone the repository
+git clone https://github.com/johnermac/bctor
+cd bctor
+
+# Install dependencies
+go mod tidy
+
+# Build the binary
+make
+
+# Start the bctor shell
+sudo ./bctor
+```
+
+Usage:
+```go
+// example: bctor-c2 = container 2 of pod B
+// containers in the same pod share resources
+// the pod has resources isolated from other
+
+new             > create a new pod
+new a 2         > creates 2 containers inside the pod a
+kill a          > kill the entire pod (and all the resources inside of it) 
+kill a2         > kill the container 2 of pod a
+list            > list all pods status
+list b          > list status of pod b (this will show the containers of b)
+forward a1 5000 > proxy port 5000 of host for communication
+help            > print the menu of commands
+exit            > close all pods and end program
+
+// you can execute commands
+
+// In batch mode: (executes and close the container after)
+
+run <pod> <command>
+
+// In interactive mode: (it keeps the container alive)
+
+:a1 <command>  - execute command in a container
+:* <command>   - execute broadcast command for all containers
+:!a1 <command> - execute commands all except (except a1 in this case)
+
+attach a1     -  access to container shell
+
+/* all commands have shortcut like 
+ attach = a
+ kill   = k
+ new    = n
+ list   = l 
+ etc
+*/
+```
+
+Info during the development
 
 ---
 
