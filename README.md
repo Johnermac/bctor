@@ -17,7 +17,7 @@ sudo ./bctor
 
 Usage:
 ```go
-// example: bctor-c2 = container 2 of pod B
+// example: bctor-c2 = container 2 of pod C
 // containers in the same pod share resources
 // the pod has resources isolated from other
 
