@@ -134,8 +134,6 @@ PID
 
 --- Container runtime ---
 
-in progress
-
 ```
  |  the goal here is to be able to control multiple containers
  |  not only exec, but inter-connect them in the same namespaces
@@ -164,8 +162,6 @@ in progress
    - REAPER (releasing and cleaning)
  [*] For that we had to implement Channels, waitGroups and Mutexes ... (That was a pain to do it, race conditions everywhere)
 
- NEXT STEP: In progress
-
  We are getting information from containers (OUTPUT)
  Now we need to send information/execute commands (INPUT)
  
@@ -174,25 +170,62 @@ in progress
  BATCH - are the workloads of execution, it will just execute something and end. This will use OUTPUT only so we maintain as LOG management the return value
  Interactive - its when you need to execute commands (basically a shell). This will use PTY
 
- [!] it worked fine like this, next step is to implement the management of PODs
+ Change of plans (slightly). Well use these 2 modes, however the interactive is the default. And we only run batch if we want to execute something and kill the container afterwards. 
+ with the command: run <pod> <command> ou run <command>. The difference is that run <pod> will run the command in an existing pod. And run <command> will create a new pod to execute the command.
+ Whats the difference? Every Pod is isolated, but containers inside the Pod share network.
 
-Im gonna write more details in my next post
+This concludes this phase!
 ```
+
+--- Pod Management ---
+```
+ | Pod means a group of containers sharing resources, e.g. network, mount, user namespaces, etc
+ | Now that we have this, we will just escalate. Instead of creating containers individually, we can create Pods with N containers inside, and if we want isolate the resources, we create another Pod and so on. 
+ | The first part: the construction of this is the easiest of the whole project, its just some organization, some refactor and a for loop getting the numbers of containers e voilà
+ | We can ofc abstract these, but I used this schema. 
+ [!] bctor-a1 = its the ID, the letter A its the Pod and the number is the Container
+ [!] bctor-b3 = Its the container 3 of Pod B - :D easy right?
+ | the number 1 it always the creator, meaning, its gonna create the network, and Namespaces
+ | The second part: the manement. Is the challenge of this phase, again RACE CONDITION. 
+ | because we have large number of activity, we also have a large amount of OUTPUT and Resources to Clean.. 
+ | we must have the initial Isolation phase really solid, cause we cant keep going back and fixing small issues; We gotta focus on organizign all process communication. 
+ | It took some time, but its done now. Added some commands, and it feels like a very good project!
+
+ 
+ [*] Ill write the details in my post, cause its too much info to write here.
+ ```
+
+This kind of project can go further and further there are a lot of things to add. But thats enough for now! 
+
+
 
 --- todo ---
 
 ```go
-- add cfg namespaces as parameters
+[ ] add cfg namespaces as parameters
 [x] fix bugs in caps and file system
-- finish file system ReadOnly
-- fix mount of proc and sys (have no idea how to do that, I think its a limitation of WSL)
-- remove comments 
+[ ] finish file system ReadOnly
+[x] fix mount of proc and sys (have no idea how to do that, I think its a limitation of WSL)
+[ ] remove comments 
 [x] improve output of diffs for better readability
 [x] in "pipe handshake" check if user NS is enabled, if not, skip uid/gid mapping
 [x] use socket in the future instead of pipe (im using both actually :D )
-- implement PTY attach to control multiples containers
+[x] implement PTY attach to control multiples containers
 [x] improve folders layout - (there is always room from improvement in layout)
-- add workloads and more profiles to seccomp
+[ ] add workloads and more profiles to seccomp
 [x] implement OUTPUT with concurrency architecture
-- implement INPUT over a CLI in supervisor
+[x] implement INPUT over a CLI in supervisor (PTY)
+[ ] add copy command to send files from HOST to CONTAINER
+[ ] add a mount option as command so the user can BIND directories to new CONTAINERS
+[x] CONTAINER -> PODS
+[ ] PODS -> NODES
+[ ] NODES -> CLUSTER
+[x] add Forward as PROXY so the CONTAINER can exchange info via NETWORK with HOST
 ```
+
+--- NEXT PROJECT --- 
+```go
+[ ] - eBPF vs seccomp-BPF (I dont see much return in learning to do eBPF from scratch tho, so maybe just implement and compare)
+[ ] - Other modern Isolation methods
+```
+

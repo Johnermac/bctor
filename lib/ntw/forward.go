@@ -65,8 +65,7 @@ func PortForward(targetPID int, hostPort, containerPort int, stop chan bool) err
 func handleForwardConn(pid int, hostConn net.Conn, containerPort int) {
 	defer hostConn.Close()
 
-	// Enter the container's network namespace to dial
-	// This is the "magic" part. We use a closure or a separate thread.
+	// itwll enter network namespace to dial	
 	var containerConn net.Conn
 	err := ExecuteInNamespace(pid, lib.NSNet, func() error {
 		var dialErr error
@@ -79,7 +78,7 @@ func handleForwardConn(pid int, hostConn net.Conn, containerPort int) {
 	}
 	defer containerConn.Close()
 
-	// 3. Splice the data (Bi-directional copy)
+	// copy for both sidess
 	done := make(chan struct{}, 2)
 	go func() { io.Copy(hostConn, containerConn); done <- struct{}{} }()
 	go func() { io.Copy(containerConn, hostConn); done <- struct{}{} }()
@@ -88,45 +87,40 @@ func handleForwardConn(pid int, hostConn net.Conn, containerPort int) {
 }
 
 func ExecuteInNamespace(pid int, nsType lib.NamespaceType, fn func() error) error {
-	// 1. Lock the OS thread so Go doesn't move us to a different thread mid-execution
+	
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// 2. Save the current (Host) namespace so we can go back later
+	// save host namespace
 	hostNS, _ := netns.Get()
 	defer hostNS.Close()
-
-	// 3. Get a handle to the Container's namespace
-	// This is the "NamespaceNet" part (usually /proc/<pid>/ns/net)
+	 
+	// usually /proc/<pid>/ns/net
 	containerNS, err := netns.GetFromPid(pid)
 	if err != nil {
 		return err
 	}
 	defer containerNS.Close()
-
-	// 4. Switch to the container's namespace
+	
 	if err := netns.Set(containerNS); err != nil {
 		return err
 	}
 
-	// 5. Switch back to host namespace when the function finishes
+	// go back
 	defer netns.Set(hostNS)
-
-	// 6. Run the actual Dialing logic
+	
 	return fn()
 }
 
 func (pf *PortForwarder) AddSession(id string, hostPort, containerPort int, pid int) error {
 	stopChan := make(chan bool)
 
-	// 1. Start the actual networking logic (The code we wrote earlier)
-	// We run it in a goroutine so it doesn't block the CLI
+	// goroutine to not block cli
 	err := PortForward(pid, hostPort, containerPort, stopChan)
 	if err != nil {
 		return err
 	}
-
-	// 2. Save the session so we can kill it later
+	
 	pf.mu.Lock()
 	pf.sessions[id] = append(pf.sessions[id], ForwardingSession{
 		HostPort: hostPort,
@@ -137,14 +131,13 @@ func (pf *PortForwarder) AddSession(id string, hostPort, containerPort int, pid 
 	return nil
 }
 
-// CleanupContainer is called by the Reaper
+// Reaper
 func (pf *PortForwarder) CleanupForward(id string) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 
 	if sessions, ok := pf.sessions[id]; ok {
-		for _, s := range sessions {
-			// Signal the listener to close
+		for _, s := range sessions {			
 			select {
 			case s.Stop <- true:
 			default:

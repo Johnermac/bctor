@@ -145,8 +145,7 @@ func SetupContainerVeth(
 	netnsFD int, // Use o INT do FD que veio do mapa 'created'
 	ip net.IP,
 ) (*NetResources, error) {
-
-	// 1. Nomes Únicos
+	 
 	suffix := randomSuffix(4) // 4 bytes = 8 chars hex. Ex: ve-abcdef
 	hostVeth := fmt.Sprintf("ve-%s", suffix)
 	tempPeer := fmt.Sprintf("vp-%s", suffix)
@@ -156,22 +155,21 @@ func SetupContainerVeth(
 		PeerName:  tempPeer,
 	}
 
-	// 2. Criar Veth Pair
+	// Criar Veth Pair
 	if err := netlink.LinkAdd(veth); err != nil {
 		return nil, fmt.Errorf("LinkAdd failed: %w", err)
 	}
-
-	// Função de limpeza em caso de erro nos passos seguintes
+	
 	cleanup := func() { _ = netlink.LinkDel(veth) }
 
-	// 3. Setup da Bridge no Host
+	// Setup da Bridge no Host
 	br, err := netlink.LinkByName(bridgeName)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("bridge %s not found: %w", bridgeName, err)
 	}
 
-	// 4. Attach Host Side
+	// Attach Host Side
 	hostLink, err := netlink.LinkByName(hostVeth)
 	if err != nil {
 		cleanup()
@@ -188,8 +186,7 @@ func SetupContainerVeth(
 		return nil, fmt.Errorf("LinkSetUp host failed: %w", err)
 	}
 
-	// 5. Mover Peer para o Namespace do Container
-	// IMPORTANTE: Use o FD passado no argumento, sem depender de PID!
+	// Mover Peer para o Namespace do Container	
 	peerLink, err := netlink.LinkByName(tempPeer)
 	if err != nil {
 		cleanup()
@@ -217,20 +214,19 @@ func ConfigureContainerInterface(
 	gateway net.IP,
 	subnet *net.IPNet,
 ) error {
-	// 1. OBRIGATÓRIO: Trava a thread do SO para evitar que o Go mude de thread
+	// Trava a thread do SO para evitar que o Go mude de thread
 	// durante a troca de namespace.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// 2. Salva o namespace original (Host) para poder retornar no final
+	// save host ns
 	origNS, err := netns.Get()
 	if err != nil {
 		return fmt.Errorf("failed to get original netns: %w", err)
 	}
 	defer origNS.Close()
 
-	// 3. ENTRA NO NAMESPACE DO CONTAINER
-	// Usamos o FD direto para evitar dependência do /proc/PID
+	// go inside container	
 	if err := unix.Setns(netnsFD, unix.CLONE_NEWNET); err != nil {
 		return fmt.Errorf("setns to container failed: %w", err)
 	}
@@ -238,9 +234,9 @@ func ConfigureContainerInterface(
 	// Garante que a thread volte para o namespace do Host ao final da função
 	defer netns.Set(origNS)
 
-	// --- AGORA ESTAMOS DENTRO DO CONTAINER ---
+	// --- INSIDE container now ---
 
-	// 4. Localiza a interface (Retry loop para aguardar a migração do kernel)
+	// Localiza a interface
 	var link netlink.Link
 	const maxRetries = 50
 	for i := 0; i < maxRetries; i++ {
@@ -254,7 +250,7 @@ func ConfigureContainerInterface(
 		return fmt.Errorf("interface %s not found after migration: %w", tempPeerName, err)
 	}
 
-	// 5. RENOMEAR PARA ETH0
+	// RENOMEAR PARA ETH0
 	// O Linux exige que a interface esteja em DOWN para renomear
 	if err := netlink.LinkSetDown(link); err != nil {
 		return fmt.Errorf("failed to set link down for rename: %w", err)
@@ -269,8 +265,8 @@ func ConfigureContainerInterface(
 		return fmt.Errorf("failed to find eth0 after rename: %w", err)
 	}
 
-	// 6. CONFIGURAÇÃO DE IP
-	// Verifica se a subnet não é nula para evitar panic
+	// CONFIGURAÇÃO DE IP
+	// Verifica se a subnet não é nula
 	if subnet == nil {
 		return fmt.Errorf("subnet cannot be nil")
 	}
@@ -284,7 +280,7 @@ func ConfigureContainerInterface(
 		return fmt.Errorf("failed to add IP address %s: %w", ip, err)
 	}
 
-	// 7. LEVANTA AS INTERFACES (eth0 e lo)
+	// LEVANTA AS INTERFACES (eth0 e lo)
 	if err := netlink.LinkSetUp(eth0); err != nil {
 		return fmt.Errorf("failed to set eth0 UP: %w", err)
 	}
@@ -293,7 +289,7 @@ func ConfigureContainerInterface(
 		_ = netlink.LinkSetUp(lo)
 	}
 
-	// 8. CONFIGURA ROTA PADRÃO (GATEWAY)
+	// CONFIGURA GATEWAY
 	route := &netlink.Route{
 		LinkIndex: eth0.Attrs().Index,
 		Gw:        gateway,
@@ -326,7 +322,7 @@ func NetworkConfig(netnsFD int, scx *lib.SupervisorCtx, spec *lib.ContainerSpec,
 		return nil
 	}
 
-	// 3. Configuração interna do Container
+	// Configuração interna do Container
 	gateway := net.ParseIP("10.0.0.1")
 	err = ConfigureContainerInterface(
 		netnsFD,         // FD do namespace

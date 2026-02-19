@@ -150,22 +150,19 @@ func StartJoiner(root *Container, name string, runMode lib.ExecutionMode, runPro
 func (s *appState) GetNextPodLetter() (string, error) {
 	s.scx.Mu.Lock()
 	defer s.scx.Mu.Unlock()
-
-	// 1. Create a set of letters currently in use by looking at active containers
+	
 	usedLetters := make(map[string]bool)
 	for _, c := range s.containers {
-		// If ID is "bctor-a1", podID is "a"
-		// We extract the letter between the '-' and the number
+		// If ID is "bctor-a1", podID is "a"		
 		parts := strings.Split(c.Spec.ID, "-")
 		if len(parts) > 1 {
-			podID := parts[1]
-			// Remove the number at the end (e.g., "a1" -> "a")
+			podID := parts[1]			
 			letter := regexp.MustCompile(`[0-9]`).ReplaceAllString(podID, "")
 			usedLetters[letter] = true
 		}
 	}
 
-	// 2. Search from 'a' to 'z' for the first free letter
+	// a to z for now- nobody will create more than 26 pods i guess
 	for i := 0; i < 26; i++ {
 		letter := string(rune('a' + i))
 		if !usedLetters[letter] {
@@ -188,16 +185,15 @@ func (s *appState) GetNextContainerIndex(letter string) int {
 }
 
 func StartJoinerBatch(root *Container, name string, cmd string, state *appState, ipc *lib.IPC) {
-	// 1. Start with the same base as a normal joiner
+	// normal joiner
 	spec := lib.DefaultSpec()
 	spec.ID = name
 
-	// 2. Set to Batch Mode and use a basic Batch Profile (Seccomp/Capabilities)
+	// set to Batch Mode 
 	spec.Workload.Mode = lib.ModeBatch
 	spec.Seccomp = lib.ProfileBatch
 	spec.Workload.Args = []string{"sh", "-c", cmd}
-
-	// 4. Namespace Sharing (Identical to your StartJoiner)
+	
 	spec.Namespaces.USER = false
 	spec.Namespaces.MOUNT = true
 	spec.Namespaces.NET = true
@@ -212,7 +208,7 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 
 	lib.LogInfo("[Batch] Container %s joining Pod %s: %s", spec.ID, root.Spec.ID, cmd)
 
-	// 5. Launch
+	// Launch
 	cj, err := StartContainer(spec, state.LogChan, &state.scx, state.containers, ipc, &state.Wg)
 	if err != nil {
 		lib.LogError("Start Batch Joiner %s failed: %v", spec.ID, err)
@@ -220,15 +216,13 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 	}
 	cj.IPC = ipc
 
-	// 6. IO Handling for Batch
-	// In Batch mode, we don't attach. We use CaptureLogs to pipe output to the console.
+	// IO Handling in Batch mode, we use CaptureLogs to pipe output to the console
 	if ipc.Log2Sup[1] != -1 {
 		readFd := ipc.Log2Sup[0]
 		state.Wg.Add(1)
 		go lib.CaptureLogs(spec.ID, readFd, ipc.Log2Sup[1], spec.Workload.Mode, state.LogChan, &state.Wg)
 	}
-
-	// Register with Multiplexer so we can see its PID/Status
+	
 	state.mtx.Register(spec.ID, ipc.PtyMaster, cj.WorkloadPID)
 
 	// Cleanup FDs
@@ -240,7 +234,7 @@ func StartJoinerBatch(root *Container, name string, cmd string, state *appState,
 }
 
 func StartCreatorBatch(letter string, cmd string, state *appState, ipc *lib.IPC) (*Container, error) {
-	// 1. Setup the basic spec
+	// basic spec
 	spec := lib.DefaultSpec()
 	spec.ID = fmt.Sprintf("bctor-%s1", letter)
 	spec.IsNetRoot = true
@@ -250,21 +244,18 @@ func StartCreatorBatch(letter string, cmd string, state *appState, ipc *lib.IPC)
 
 	lib.LogInfo("[Batch] Container %s=Creator (Command: %s)", spec.ID, cmd)
 
-	// 3. Launch (This creates the new namespaces)
+	// Launch
 	c, err := StartContainer(spec, state.LogChan, &state.scx, state.containers, ipc, &state.Wg)
 	if err != nil {
 		return nil, err
 	}
 	c.IPC = ipc
-
-	// 4. Batch IO Handling
-	// Unlike the shell, we don't close the pipe, we capture it.
+	
 	readFd := ipc.Log2Sup[0]
 	state.Wg.Add(1)
 	go lib.CaptureLogs(spec.ID, readFd, ipc.Log2Sup[1], spec.Workload.Mode, state.LogChan, &state.Wg)
 
-	// 5. Cleanup and Register
-	// Note: We still close the Slave PTY because the workload already has its copy
+	// Cleanup and Register	
 	ipc.PtySlave.Close()
 	state.mtx.Register(spec.ID, ipc.PtyMaster, c.WorkloadPID)
 

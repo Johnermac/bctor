@@ -18,13 +18,13 @@ const (
 	TypeSuccess
 	TypeWarn
 	TypeError
-	TypeContainer // For the actual workload output
+	TypeContainer // workload output
 )
 
 type LogMsg struct {
 	ContainerID string
 	Data        string
-	Type        LogType // Use this to determine styling
+	Type        LogType 
 	IsHeader    bool
 	IsFooter    bool
 }
@@ -61,11 +61,10 @@ func LogSuccess(format string, a ...interface{}) {
 	}
 }
 
-// lib/logger.go
 func LogWarn(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
 
-	// Safety check
+	// safety check
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("\033[90mWARN:\033[0m %s (logger closed)\r\n", msg)
@@ -104,7 +103,7 @@ func StartGlobalLogger(
 			isAttached := mtx.GetActiveID() == msg.ContainerID
 			switch msg.Type {
 			case TypeContainer:
-				// Batch markers are ignored in live streaming mode.
+				// ignore batch
 				if msg.IsHeader || msg.IsFooter {
 					continue
 				}
@@ -159,7 +158,7 @@ func CaptureLogs(
 ) {
 	defer wg.Done()
 
-	// Close write end in supervisor
+	// close write in supervisor
 	unix.Close(writeFd)
 
 	f := os.NewFile(uintptr(readFd), "container-log")
@@ -212,11 +211,11 @@ func DrawBox(title string, lines []string) {
 	minWidth := 50
 	maxWidth := 100
 
-	// 1. Calculate innerWidth using Runes, not Bytes
+	// calculate innerWidth using Runes (bcause healthbar)
 	innerWidth := utf8.RuneCountInString(StripANSI(title))
 
 	for _, l := range lines {
-		visLen := utf8.RuneCountInString(StripANSI(l)) // FIX: Use Runes here
+		visLen := utf8.RuneCountInString(StripANSI(l)) 
 		if visLen > innerWidth {
 			innerWidth = visLen
 		}
@@ -234,7 +233,7 @@ func DrawBox(title string, lines []string) {
 
 	// Header
 	fmt.Printf("\r%s┌%s┐%s\n", Cyan, hline, Reset)
-	// Use the %-*s with stripANSI(title) is okay because title usually has no dots/emojis
+	// its okay because title usually has no dots/emojis
 	fmt.Printf("\r%s│ %-*s │%s\n", Cyan, innerWidth, StripANSI(title), Reset)
 	fmt.Printf("\r%s├%s┤%s\n", Cyan, hline, Reset)
 
@@ -246,21 +245,19 @@ func DrawBox(title string, lines []string) {
 			visible := StripANSI(clean)
 			visLen := utf8.RuneCountInString(visible)
 
-			displayLine := clean
-			// FIX: Comparison should also be Rune-based
+			displayLine := clean			
 			if visLen > innerWidth {
-				// Truncating Unicode is tricky; this is a safe way to do it
+				// Truncating Unicode 
 				runes := []rune(visible)
 				displayLine = string(runes[:innerWidth-3]) + "..."
-				visLen = innerWidth // Reset visLen for padding math
+				visLen = innerWidth 
 			}
 
 			padding := innerWidth - visLen
 			if padding < 0 {
 				padding = 0
 			}
-
-			// Print: notice the extra space after displayLine for consistent "gutter"
+			
 			fmt.Printf("\r%s│%s %s%s %s│%s\n",
 				Cyan, Reset, displayLine, strings.Repeat(" ", padding), Cyan, Reset)
 		}

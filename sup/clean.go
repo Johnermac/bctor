@@ -48,22 +48,20 @@ func OnContainerExit(
 			// --- 1. WORKLOAD CLEANUP ---
 			if ev.PID == c.WorkloadPID {
 				lib.LogInfo("Reaper: Workload for %s exited. Killing Init...", c.Spec.ID)
-
-				// Only NetRoot init waits on KeepAlive; release it once.
+				
 				if c.Spec.IsNetRoot && c.IPC != nil && c.IPC.KeepAlive[1] >= 0 {
 					lib.FreeFd(c.IPC.KeepAlive[1])
 					c.IPC.KeepAlive[1] = -1
 				}
 			}
 
-			// --- 2. INIT / NETWORK / FORWARD CLEANUP ---
+			// ---  INIT / NETWORK / FORWARD CLEANUP ---
 			if ev.PID == c.InitPID {
 				c.State = ContainerExited
 				lib.LogWarn("Reaper: Container %s (PID %d) exited", c.Spec.ID, ev.PID)
 
 				podName, _, isPodContainer := splitContainerID(c.Spec.ID)
-				if c.Net != nil && isPodContainer {
-					// Root may exit before joiners; save net resources until pod is empty.
+				if c.Net != nil && isPodContainer {					
 					podNetResources[podName] = c.Net
 				}
 
@@ -79,7 +77,7 @@ func OnContainerExit(
 					delete(scx.Handles, c.Spec.ID)
 				}
 
-				// Finally, remove from the global map
+				// remove from the global map
 				delete(containers, c.Spec.ID)
 				releaseLastNetRootKeepAlive(podName, containers)
 
