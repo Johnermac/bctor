@@ -72,9 +72,9 @@ func (m *Multiplexer) d_forward(input string) {
 		return
 	}
 
-	m.state.mtx.mu.Lock()
+	m.state.scx.Mu.Lock()
 	c, ok := m.state.containers[id]
-	m.state.mtx.mu.Unlock()
+	m.state.scx.Mu.Unlock()
 
 	if !ok {
 		fmt.Printf("Error: container %s not found\r\n", id)
@@ -145,10 +145,10 @@ func (m *Multiplexer) d_run(input string) {
 
 	if isJoiner {
 		// JOINER BATCH
-		m.state.mtx.mu.Lock()
+		m.state.scx.Mu.Lock()
 		rootID := fmt.Sprintf("bctor-%s1", letter)
 		root, exists := m.state.containers[rootID]
-		m.state.mtx.mu.Unlock()
+		m.state.scx.Mu.Unlock()
 
 		if !exists {
 			lines = append(lines, fmt.Sprintf("[-] Error: Pod %s doesn't exist", letter))
@@ -165,9 +165,9 @@ func (m *Multiplexer) d_run(input string) {
 		if err != nil {
 			lines = append(lines, "[-] Failed to start batch creator")
 		} else {
-			m.state.mtx.mu.Lock()
+			m.state.scx.Mu.Lock()
 			m.state.containers[c.Spec.ID] = c
-			m.state.mtx.mu.Unlock()
+			m.state.scx.Mu.Unlock()
 			lines = append(lines, fmt.Sprintf("[+] %sNew Pod [%s] running: %s", lib.Reset, letter, fullCmd))
 		}
 	}
@@ -184,12 +184,12 @@ func (m *Multiplexer) d_clear() {
 func (m *Multiplexer) d_exit() {
 	lib.LogInfo("Supervisor shutting down. Cleaning up global network...")
 
-	m.state.mtx.mu.Lock()
+	m.state.scx.Mu.Lock()
 	for id, c := range m.state.containers {
 		unix.Kill(c.WorkloadPID, unix.SIGKILL)
 		delete(m.state.containers, id)
 	}
-	m.state.mtx.mu.Unlock()
+	m.state.scx.Mu.Unlock()
 
 	// delete global
 	ntw.RemoveNATRule("10.0.0.0/24", m.state.iface)
@@ -278,9 +278,9 @@ func (m *Multiplexer) d_new(input string) {
 		if err != nil {
 			lines = append(lines, "[-] Start Creator failed")
 		} else {
-			m.state.mtx.mu.Lock()
+			m.state.scx.Mu.Lock()
 			m.state.containers[c.Spec.ID] = c
-			m.state.mtx.mu.Unlock()
+			m.state.scx.Mu.Unlock()
 
 			lines = append(lines, fmt.Sprintf("[+] Created Pod [%s]", letter))
 		}
@@ -299,10 +299,10 @@ func (m *Multiplexer) d_new(input string) {
 			}
 		}
 
-		m.state.mtx.mu.Lock()
+		m.state.scx.Mu.Lock()
 		rootID := fmt.Sprintf("bctor-%s1", letter)
 		root, exists := m.state.containers[rootID]
-		m.state.mtx.mu.Unlock()
+		m.state.scx.Mu.Unlock()
 
 		if !exists {
 			lines = append(lines, fmt.Sprintf("[-] Error: Pod %s does not exist", letter))
@@ -313,9 +313,9 @@ func (m *Multiplexer) d_new(input string) {
 				num := m.state.GetNextContainerIndex(letter)
 				name := fmt.Sprintf("bctor-%s%d", letter, num)
 
-				m.state.mtx.mu.Lock()
+				m.state.scx.Mu.Lock()
 				m.state.containers[name] = &Container{State: ContainerInitializing}
-				m.state.mtx.mu.Unlock()
+				m.state.scx.Mu.Unlock()
 
 				go StartJoiner(root, name, lib.ModeInteractive, lib.ProfileDebugShell, m.state, ipc)
 				lines = append(lines, fmt.Sprintf("[+] Container [%s] joining Pod [%s]", name, letter))
@@ -505,9 +505,9 @@ func (m *Multiplexer) d_attach(input string) {
 	}
 
 	// check if alive
-	m.state.mtx.mu.Lock()
+	m.state.scx.Mu.Lock()
 	container, exists := m.state.containers[targetID]
-	m.state.mtx.mu.Unlock()
+	m.state.scx.Mu.Unlock()
 
 	if !exists || container == nil {
 		fmt.Printf("\r\n[-] Error: Container %s does not exist.\r\n", targetID)
@@ -579,12 +579,12 @@ func (m *Multiplexer) d_exec(input string) {
 	m.mu.Unlock()
 
 	for id, target := range pendingExecs {
-		m.state.mtx.mu.Lock()
+		m.state.scx.Mu.Lock()
 		container, exists := m.state.containers[id]
 
 		// check if alive
 		if !exists || container == nil || container.State == ContainerExited {
-			m.state.mtx.mu.Unlock()
+			m.state.scx.Mu.Unlock()
 			if len(pendingExecs) == 1 {
 				fmt.Printf("\r\n[-] Cannot exec: %s is not running.\r\n", id)
 			}
@@ -594,10 +594,10 @@ func (m *Multiplexer) d_exec(input string) {
 		// final check
 		if err := syscall.Kill(container.WorkloadPID, 0); err != nil {
 			container.State = ContainerExited // sync
-			m.state.mtx.mu.Unlock()
+			m.state.scx.Mu.Unlock()
 			continue
 		}
-		m.state.mtx.mu.Unlock()
+		m.state.scx.Mu.Unlock()
 
 		m.execOne(id, target, cmd)
 	}

@@ -277,6 +277,12 @@ This kind of project can go further and further there are a lot of things to add
 [ ] PODS -> NODES
 [ ] NODES -> CLUSTER
 [x] add Forward as PROXY so the CONTAINER can exchange info via NETWORK with HOST
+
+For reliability: 
+[ ] save the state to disk "/var/run/bctor/"
+[ ] wrap core loops in recover() blocks
+[ ] distributed, save state to yml or json and restart containers based on replica values
+
 ```
 
 --- NEXT PROJECT --- 

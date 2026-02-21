@@ -174,6 +174,9 @@ func (s *appState) GetNextPodLetter() (string, error) {
 }
 
 func (s *appState) GetNextContainerIndex(letter string) int {
+	s.scx.Mu.Lock()
+	defer s.scx.Mu.Unlock()
+
 	count := 0
 	for id := range s.containers {
 		// Check if ID contains "-a"
