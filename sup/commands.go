@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Johnermac/bctor/lib"
@@ -94,6 +95,10 @@ func (m *Multiplexer) d_forward(input string) {
 	}
 
 	// run the session
+	if c.WorkloadPID <= 0 {
+		fmt.Printf("Error: container %s workload PID is not ready yet\r\n", id)
+		return
+	}
 	err = m.state.scx.Forwards.AddSession(podName, port, port, c.WorkloadPID)
 	if err != nil {
 		fmt.Printf("Error starting forward: %v\r\n", err)
@@ -186,7 +191,11 @@ func (m *Multiplexer) d_exit() {
 
 	m.state.scx.Mu.Lock()
 	for id, c := range m.state.containers {
-		unix.Kill(c.WorkloadPID, unix.SIGKILL)
+		if c.WorkloadPID > 0 {
+			unix.Kill(c.WorkloadPID, unix.SIGKILL)
+		} else if c.InitPID > 0 {
+			unix.Kill(c.InitPID, unix.SIGKILL)
+		}
 		delete(m.state.containers, id)
 	}
 	m.state.scx.Mu.Unlock()
@@ -210,9 +219,6 @@ func (m *Multiplexer) d_kill(input string) {
 	}
 
 	podLetter := parts[1]
-	m.state.scx.Mu.Lock()
-	defer m.state.scx.Mu.Unlock()
-
 	foundAny := false
 
 	// kill specific container
@@ -220,40 +226,41 @@ func (m *Multiplexer) d_kill(input string) {
 		index := parts[2]
 		targetID := fmt.Sprintf("bctor-%s%s", podLetter, index)
 
-		if c, exists := m.state.containers[targetID]; exists {
-			syscall.Kill(c.WorkloadPID, syscall.SIGKILL)
-			podName, _, ok := splitContainerID(targetID)
-			if ok &&
-				c.Spec != nil &&
-				c.Spec.IsNetRoot &&
-				c.IPC != nil &&
-				c.IPC.KeepAlive[1] >= 0 &&
-				podWouldBeEmptyAfterRemoving(podName, targetID, m.state.containers) {
-				lib.FreeFd(c.IPC.KeepAlive[1])
-				c.IPC.KeepAlive[1] = -1
-			}
-			lines = append(lines, fmt.Sprintf("[+] Killed container %s (PID %d)", targetID, c.WorkloadPID))
+		m.state.scx.Mu.Lock()
+		if _, exists := m.state.containers[targetID]; exists {
+			m.state.scx.Mu.Unlock()
+			lines = append(lines, m.killOneWithRetry(targetID))
 			foundAny = true
+		} else {
+			m.state.scx.Mu.Unlock()
 		}
 
 		// kill pod
 	} else {
-		prefix := fmt.Sprintf("bctor-%s", podLetter)
-		for id, c := range m.state.containers {
-			if strings.HasPrefix(id, prefix) {
-				syscall.Kill(c.WorkloadPID, syscall.SIGKILL)
-				podName, _, ok := splitContainerID(id)
-				if ok &&
-					c.Spec != nil &&
-					c.Spec.IsNetRoot &&
-					c.IPC != nil &&
-					c.IPC.KeepAlive[1] >= 0 &&
-					podWouldBeEmptyAfterRemoving(podName, id, m.state.containers) {
-					lib.FreeFd(c.IPC.KeepAlive[1])
-					c.IPC.KeepAlive[1] = -1
+		// Multiple rounds: catch containers that are still initializing now but get PIDs moments later.
+		const rounds = 3
+		for round := 0; round < rounds; round++ {
+			prefix := fmt.Sprintf("bctor-%s", podLetter)
+			ids := make([]string, 0)
+			m.state.scx.Mu.Lock()
+			for id := range m.state.containers {
+				if strings.HasPrefix(id, prefix) {
+					ids = append(ids, id)
 				}
-				lines = append(lines, fmt.Sprintf("[+] Killed %s (PID %d)", id, c.WorkloadPID))
+			}
+			m.state.scx.Mu.Unlock()
+
+			if len(ids) == 0 {
+				break
+			}
+
+			for _, id := range ids {
+				lines = append(lines, m.killOneWithRetry(id))
 				foundAny = true
+			}
+
+			if round < rounds-1 {
+				time.Sleep(80 * time.Millisecond)
 			}
 		}
 	}
@@ -592,6 +599,11 @@ func (m *Multiplexer) d_exec(input string) {
 		}
 
 		// final check
+		if container.WorkloadPID <= 0 {
+			container.State = ContainerExited
+			m.state.scx.Mu.Unlock()
+			continue
+		}
 		if err := syscall.Kill(container.WorkloadPID, 0); err != nil {
 			container.State = ContainerExited // sync
 			m.state.scx.Mu.Unlock()
@@ -665,4 +677,47 @@ func podWouldBeEmptyAfterRemoving(podName, removeID string, containers map[strin
 		tmp[id] = c
 	}
 	return isPodEmpty(podName, tmp)
+}
+
+func (m *Multiplexer) killOneWithRetry(targetID string) string {
+	const retries = 4
+	for attempt := 0; attempt < retries; attempt++ {
+		m.state.scx.Mu.Lock()
+		c, exists := m.state.containers[targetID]
+		if !exists || c == nil {
+			m.state.scx.Mu.Unlock()
+			return fmt.Sprintf("[-] Skipped %s: not found", targetID)
+		}
+
+		// Preferred path: kill workload process.
+		if c.WorkloadPID > 0 {
+			_ = syscall.Kill(c.WorkloadPID, syscall.SIGKILL)
+			podName, _, ok := splitContainerID(targetID)
+			if ok &&
+				c.Spec != nil &&
+				c.Spec.IsNetRoot &&
+				c.IPC != nil &&
+				c.IPC.KeepAlive[1] >= 0 &&
+				podWouldBeEmptyAfterRemoving(podName, targetID, m.state.containers) {
+				lib.FreeFd(c.IPC.KeepAlive[1])
+				c.IPC.KeepAlive[1] = -1
+			}
+			m.state.scx.Mu.Unlock()
+			return fmt.Sprintf("[+] Killed %s (PID %d)", targetID, c.WorkloadPID)
+		}
+
+		// Fallback: if workload PID isn't ready, kill init PID to force teardown.
+		if c.InitPID > 0 {
+			_ = syscall.Kill(c.InitPID, syscall.SIGKILL)
+			m.state.scx.Mu.Unlock()
+			return fmt.Sprintf("[+] Killed %s init (PID %d)", targetID, c.InitPID)
+		}
+		m.state.scx.Mu.Unlock()
+
+		if attempt < retries-1 {
+			time.Sleep(40 * time.Millisecond)
+		}
+	}
+
+	return fmt.Sprintf("[-] Skipped %s: no valid PID yet", targetID)
 }
